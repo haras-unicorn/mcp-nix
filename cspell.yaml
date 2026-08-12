@@ -8,3 +8,14 @@ ignoreWords:
   - haras
   - mcp-nix
   - nixpkgs
+  - bwrap
+  - bubblewrap
+  - userns
+  - MCP_NIX_SANDBOX
+  - tmpfs
+  - setuid
+  - unsandboxed
+  - sandboxed
+  - sandboxing
+  - TMPDIR
+  - cwd

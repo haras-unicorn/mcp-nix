@@ -62,6 +62,7 @@
             git
             nushell
             nix
+            bubblewrap
             nil
             nixfmt
             markdownlint-cli
@@ -124,7 +125,7 @@
             text = ''nu ${devScriptText} "$@"'';
           };
 
-          package = naersk'.buildPackage (
+          unwrapped = naersk'.buildPackage (
             let
               cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
             in
@@ -149,6 +150,22 @@
               version = cargoToml.package.version;
             }
           );
+
+          package = pkgs.symlinkJoin {
+            name = "mcp-nix";
+            paths = [ unwrapped ];
+            buildInputs = [ pkgs.makeWrapper ];
+            meta.mainProgram = "mcp-nix";
+            postBuild = ''
+              wrapProgram $out/bin/mcp-nix \
+                --prefix PATH : ${
+                  lib.makeBinPath [
+                    pkgs.nix
+                    pkgs.bubblewrap
+                  ]
+                }
+            '';
+          };
         in
         {
           devShells.default = pkgs.mkShell {
