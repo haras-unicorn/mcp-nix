@@ -9,4 +9,13 @@
 #![deny(clippy::todo)]
 #![deny(clippy::allow_attributes_without_reason)]
 
-fn main() {}
+use mcp_nix::NixServer;
+use rmcp::ServiceExt;
+use rmcp::transport::stdio;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+  let service = NixServer.serve(stdio()).await?;
+  service.waiting().await?;
+  Ok(())
+}

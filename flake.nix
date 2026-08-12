@@ -60,6 +60,8 @@
             rust
             flake-root
             git
+            nushell
+            nix
             nil
             nixfmt
             markdownlint-cli
@@ -78,64 +80,49 @@
             cargo-edit
           ];
 
-          scripts =
-            lib.mapAttrsToList
-              (
-                name: text:
-                pkgs.writeShellApplication {
-                  name = "dev-${name}";
-                  runtimeInputs = external;
-                  inherit text;
-                }
-              )
-              {
-                run = ''
-                  cd "$(flake-root)"
+          devScriptText = pkgs.writeText "mcp-nix-dev.nu" ''
+            def "main" [] {
+              dev -h
+            }
 
-                  cargo run --bin mcp-nix
-                '';
-                format = ''
-                  cd "$(flake-root)"
+            def "main run" [] {
+              cd (flake-root)
+              cargo run --bin mcp-nix
+            }
 
-                  prettier --write .
+            def "main format" [] {
+              cd (flake-root)
+              prettier --write .
+              nixfmt ...(fd '.*\.nix$' . | lines)
+              cargo fmt --all
+              cargo clippy --fix --allow-dirty
+            }
 
-                  # shellcheck disable=SC2046
-                  nixfmt $(fd '.*\.nix$' .)
+            def "main lint" [] {
+              cd (flake-root)
+              prettier --check .
+              cspell lint . --no-progress
+              nixfmt --check ...(fd '.*\.nix$' . | lines)
+              markdownlint --ignore-path .markdownignore .
+              if ($env.NIX_BUILD_TOP? | is-empty) {
+                (markdown-link-check
+                  --config .markdown-link-check.json
+                  --quiet
+                  ...(fd '.*.md' . | lines))
+                (taplo lint
+                  --schema "https://raw.githubusercontent.com/release-plz/release-plz/refs/tags/release-plz-v0.3.148/.schema/latest.json"
+                  .release-plz.toml)
+                cargo clippy -- -D warnings
+                cargo test
+              }
+            }
+          '';
 
-                  cargo fmt --all
-                  cargo clippy --fix --allow-dirty
-                '';
-                lint = ''
-                  cd "$(flake-root)"
-
-                  prettier --check .
-
-                  cspell lint . --no-progress
-
-                  # shellcheck disable=SC2046
-                  nixfmt --check $(fd '.*\.nix$' .)
-
-                  markdownlint --ignore-path .markdownignore .
-                  if [[ -z "''${NIX_BUILD_TOP:-}" ]]; then
-                    # shellcheck disable=SC2046
-                    markdown-link-check \
-                      --config .markdown-link-check.json \
-                      --quiet \
-                      $(fd '.*.md' .)
-                  fi
-
-                  if [[ -z "''${NIX_BUILD_TOP:-}" ]]; then
-                    taplo lint \
-                      --schema "https://raw.githubusercontent.com/release-plz/release-plz/refs/tags/release-plz-v0.3.148/.schema/latest.json" \
-                      .release-plz.toml
-                  fi
-
-                  if [[ -z "''${NIX_BUILD_TOP:-}" ]]; then
-                    cargo clippy -- -D warnings
-                    cargo test
-                  fi
-                '';
-              };
+          devScript = pkgs.writeShellApplication {
+            name = "dev";
+            runtimeInputs = external;
+            text = ''nu ${devScriptText} "$@"'';
+          };
 
           package = naersk'.buildPackage (
             let
@@ -165,7 +152,7 @@
         in
         {
           devShells.default = pkgs.mkShell {
-            packages = external ++ scripts;
+            packages = external ++ [ devScript ];
           };
 
           apps =
