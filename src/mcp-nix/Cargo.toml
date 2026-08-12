@@ -8,3 +8,10 @@ license-file = "../../LICENSE.md"
 readme = "../../README.md"
 edition = "2024"
 
+[dependencies]
+anyhow = "1"
+rmcp = { version = "3.1.2", features = ["transport-io"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+

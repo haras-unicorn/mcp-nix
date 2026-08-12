@@ -7,3 +7,4 @@ ignorePaths:
 ignoreWords:
   - haras
   - mcp-nix
+  - nixpkgs

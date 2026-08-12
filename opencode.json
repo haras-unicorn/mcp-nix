@@ -4,6 +4,8 @@
     "README.md",
     "CONTRIBUTING.md",
     "flake.nix",
-    "src/mcp-nix/main.rs"
+    "src/mcp-nix/src/main.rs",
+    "src/mcp-nix/src/lib.rs",
+    "src/mcp-nix/src/nix.rs"
   ]
 }
