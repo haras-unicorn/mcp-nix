@@ -8,7 +8,6 @@ workspace with a single crate, `mcp-nix`, inside `src`.
 - `src/mcp-nix/src/lib.rs` - MCP server and tool definitions.
 - `src/mcp-nix/src/nix.rs` - wrappers around `nix` commands.
 - `src/mcp-nix/src/main.rs` - stdio entry point.
-- `src/mcp-nix/tests/nix_build.rs` - integration tests for the `nix` build tool.
 - `docs` - mdBook documentation.
 - `flake.nix` - flake exposing the development shell, the `mcp-nix` package and
   runnable apps.

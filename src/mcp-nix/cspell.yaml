@@ -6,3 +6,9 @@ ignoreWords:
   - rmcp
   - serde
   - thiserror
+  - coreutils
+  - bwrap
+  - chdir
+  - sandboxed
+  - sandboxing
+  - MCP_NIX_TEST_VAR

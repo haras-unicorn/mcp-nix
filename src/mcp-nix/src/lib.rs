@@ -12,6 +12,9 @@
 #![deny(clippy::allow_attributes_without_reason)]
 
 mod nix;
+mod sandbox;
+
+use std::collections::HashMap;
 
 use rmcp::ErrorData;
 use rmcp::handler::server::wrapper::Parameters;
@@ -20,7 +23,8 @@ use rmcp::schemars;
 use rmcp::tool;
 use rmcp::tool_router;
 
-pub use nix::{NixError, build_package};
+pub use nix::{NixError, build_package, run_package};
+pub use sandbox::{RunOptions, run_program};
 
 /// Parameters for the `nix_build` tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -30,6 +34,37 @@ pub struct BuildParams {
     description = "A nix package reference, for example `nixpkgs#hello`."
   )]
   pub package: String,
+}
+
+/// Parameters for the `nix_run` tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RunParams {
+  /// A nix package reference, for example `nixpkgs#hello`.
+  #[schemars(
+    description = "A nix package reference, for example `nixpkgs#hello`."
+  )]
+  pub package: String,
+  /// The program to run from the built package, for example `hello`.
+  #[schemars(
+    description = "The program to run from the built package, for example `hello`."
+  )]
+  pub program: String,
+  /// Arguments passed to the program.
+  #[schemars(description = "Arguments passed to the program.")]
+  #[serde(default)]
+  pub args: Vec<String>,
+  /// Additional environment variables set for the program.
+  #[schemars(
+    description = "Additional environment variables set for the program. The program runs with a cleared environment, so these supplement the minimal base environment."
+  )]
+  #[serde(default)]
+  pub env: HashMap<String, String>,
+  /// The working directory for the program.
+  #[schemars(
+    description = "The working directory for the program. Inside the sandbox it must be visible, for example `/tmp`."
+  )]
+  #[serde(default)]
+  pub cwd: Option<String>,
 }
 
 /// MCP server that provides nix tooling.
@@ -51,6 +86,46 @@ impl NixServer {
         Ok(CallToolResult::success(vec![ContentBlock::text(
           store_path,
         )]))
+      }
+      Ok(Err(error)) => Ok(CallToolResult::error(vec![ContentBlock::text(
+        error.to_string(),
+      )])),
+      Err(join_error) => {
+        Err(ErrorData::internal_error(join_error.to_string(), None))
+      }
+    }
+  }
+
+  /// Build a nix package and run one of its programs, wrapped in a bubblewrap
+  /// sandbox.
+  #[tool(
+    description = "Build a nix package and run one of its programs, wrapped in a bubblewrap sandbox."
+  )]
+  async fn nix_run(
+    &self,
+    Parameters(params): Parameters<RunParams>,
+  ) -> Result<CallToolResult, ErrorData> {
+    let RunParams {
+      package,
+      program,
+      args,
+      env,
+      cwd,
+    } = params;
+
+    match tokio::task::spawn_blocking(move || {
+      let options = RunOptions {
+        args,
+        env,
+        cwd,
+        sandbox: sandbox::sandbox_args(),
+      };
+      run_package(&package, &program, &options)
+    })
+    .await
+    {
+      Ok(Ok(output)) => {
+        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
       }
       Ok(Err(error)) => Ok(CallToolResult::error(vec![ContentBlock::text(
         error.to_string(),
