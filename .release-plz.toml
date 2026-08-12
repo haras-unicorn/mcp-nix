@@ -1,0 +1,3 @@
+[[package]]
+name = "mcp-nix"
+changelog_path = "./CHANGELOG.md"
