@@ -15,16 +15,19 @@
   };
 
   outputs =
-    { self, flake-parts, ... }@inputs:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
-      perSystem =
-        { pkgs, lib, ... }:
+    {
+      self,
+      nixpkgs,
+      flake-parts,
+      ...
+    }@inputs:
+    let
+      nixpkgsRev = nixpkgs.rev;
+
+      makePackages =
+        pkgs:
         let
-          nixpkgsRev = inputs.nixpkgs.rev;
+          lib = pkgs.lib;
 
           rust = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.latest.default.override {
             extensions = [
@@ -34,7 +37,6 @@
               "rust-src"
             ];
           };
-
           rustc = rust;
           cargo = rust;
 
@@ -42,6 +44,94 @@
             inherit rustc cargo;
           };
 
+          unwrapped = naersk'.buildPackage (
+            let
+              cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
+            in
+            {
+              src = lib.cleanSourceWith {
+                src = self;
+                filter =
+                  path: type:
+                  (lib.hasSuffix ".rs" path)
+                  || (lib.hasSuffix ".toml" path)
+                  || (lib.hasSuffix ".lock" path)
+                  || (type == "directory");
+              };
+              MCP_NIX_NIXPKGS_REV = nixpkgsRev;
+              cargoBuildOptions =
+                prev:
+                prev
+                ++ [
+                  "-p"
+                  "mcp-nix"
+                ];
+              name = cargoToml.package.name;
+              version = cargoToml.package.version;
+              meta.mainProgram = "mcp-nix";
+            }
+          );
+        in
+        {
+          inherit rust unwrapped;
+          package =
+            pkgs.callPackage
+              (
+                {
+                  lib,
+                  makeWrapper,
+                  symlinkJoin,
+                  mcp-nix-unwrapped,
+                  nix,
+                  bubblewrap,
+                }:
+                symlinkJoin {
+                  name = "mcp-nix";
+                  paths = [ unwrapped ];
+                  buildInputs = [ makeWrapper ];
+                  meta.mainProgram = "mcp-nix";
+                  postBuild = ''
+                    wrapProgram $out/bin/mcp-nix \
+                      --prefix PATH : ${
+                        lib.makeBinPath [
+                          nix
+                          bubblewrap
+                        ]
+                      }
+                  '';
+                }
+              )
+              {
+                mcp-nix-unwrapped = unwrapped;
+              };
+        };
+    in
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+
+      flake.overlays =
+        let
+          overlay =
+            final: prev:
+            let
+              packages = makePackages final;
+            in
+            {
+              mcp-nix = packages.package;
+              mcp-nix-unwrapped = packages.unwrapped;
+            };
+        in
+        {
+          default = overlay;
+          mcp-nix = overlay;
+        };
+
+      perSystem =
+        { pkgs, lib, ... }:
+        let
           flake-root = pkgs.writeShellApplication {
             name = "flake-root";
             text = ''
@@ -59,7 +149,6 @@
           };
 
           external = with pkgs; [
-            rust
             flake-root
             git
             nushell
@@ -128,87 +217,43 @@
             }
           '';
 
-          devScript = pkgs.writeShellApplication {
-            name = "dev";
-            runtimeInputs = external;
-            text = ''nu ${devScriptText} "$@"'';
-          };
-
-          unwrapped = naersk'.buildPackage (
+          devScript =
             let
-              cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
+              packages = makePackages pkgs;
             in
-            {
-              src = lib.cleanSourceWith {
-                src = self;
-                filter =
-                  path: type:
-                  (lib.hasSuffix ".rs" path)
-                  || (lib.hasSuffix ".toml" path)
-                  || (lib.hasSuffix ".lock" path)
-                  || (type == "directory");
-              };
-              MCP_NIX_NIXPKGS_REV = nixpkgsRev;
-              cargoBuildOptions =
-                prev:
-                prev
-                ++ [
-                  "-p"
-                  "mcp-nix"
-                ];
-              name = cargoToml.package.name;
-              version = cargoToml.package.version;
-              meta.mainProgram = "mcp-nix";
-            }
-          );
-
-          package =
-            pkgs.callPackage
-              (
-                {
-                  lib,
-                  makeWrapper,
-                  symlinkJoin,
-                  mcp-nix-unwrapped,
-                  nix,
-                  bubblewrap,
-                }:
-                symlinkJoin {
-                  name = "mcp-nix";
-                  paths = [ unwrapped ];
-                  buildInputs = [ makeWrapper ];
-                  meta.mainProgram = "mcp-nix";
-                  postBuild = ''
-                    wrapProgram $out/bin/mcp-nix \
-                      --prefix PATH : ${
-                        lib.makeBinPath [
-                          nix
-                          bubblewrap
-                        ]
-                      }
-                  '';
-                }
-              )
-              {
-                mcp-nix-unwrapped = unwrapped;
-              };
+            pkgs.writeShellApplication {
+              name = "dev";
+              runtimeInputs = external ++ [ packages.rust ];
+              text = ''nu ${devScriptText} "$@"'';
+            };
         in
         {
-          devShells.default = pkgs.mkShell {
-            packages = external ++ [ devScript ];
-            MCP_NIX_NIXPKGS_REV = nixpkgsRev;
-          };
+          devShells =
+            let
+              packages = makePackages pkgs;
+            in
+            {
+              default = pkgs.mkShell {
+                packages = external ++ [
+                  packages.rust
+                  devScript
+                ];
+                MCP_NIX_NIXPKGS_REV = nixpkgsRev;
+              };
+            };
 
           apps =
             let
+              packages = makePackages pkgs;
+
               app = {
                 type = "app";
-                program = lib.getExe package;
+                program = lib.getExe packages.package;
                 meta.description = "MCP server that provides nix tooling";
               };
               unwrappedApp = {
                 type = "app";
-                program = lib.getExe unwrapped;
+                program = lib.getExe packages.unwrapped;
                 meta.description = "MCP server that provides nix tooling (unwrapped)";
               };
             in
@@ -221,6 +266,8 @@
 
           packages =
             let
+              packages = makePackages pkgs;
+
               docs =
                 pkgs.runCommand "mcp-nix-docs"
                   {
@@ -233,10 +280,10 @@
             in
             {
               inherit docs;
-              default = package;
-              mcp-nix = package;
-              unwrapped = unwrapped;
-              mcp-nix-unwrapped = unwrapped;
+              default = packages.package;
+              mcp-nix = packages.package;
+              unwrapped = packages.unwrapped;
+              mcp-nix-unwrapped = packages.unwrapped;
             };
         };
     };
