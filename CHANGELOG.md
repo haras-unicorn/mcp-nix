@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/haras-unicorn/mcp-nix/compare/v0.1.0...v0.1.1) - 2026-08-13
+
+### Added
+
+- nix check tool and --show-trace option for everything ([#9](https://github.com/haras-unicorn/mcp-nix/pull/9))
+- allowed commands ([#8](https://github.com/haras-unicorn/mcp-nix/pull/8))
+- nix develop tool ([#6](https://github.com/haras-unicorn/mcp-nix/pull/6))
+- nix run tool and sandbox ([#5](https://github.com/haras-unicorn/mcp-nix/pull/5))
+- nix build tool ([#3](https://github.com/haras-unicorn/mcp-nix/pull/3))
+
 ## [0.1.0](https://github.com/haras-unicorn/mcp-nix/releases/tag/v0.1.0) - 2026-08-12
 
 ### Added
