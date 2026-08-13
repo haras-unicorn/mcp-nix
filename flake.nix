@@ -248,12 +248,12 @@
 
               app = {
                 type = "app";
-                program = pkgs.getExe packages.package;
+                program = lib.getExe packages.package;
                 meta.description = "MCP server that provides nix tooling";
               };
               unwrappedApp = {
                 type = "app";
-                program = pkgs.getExe packages.unwrapped;
+                program = lib.getExe packages.unwrapped;
                 meta.description = "MCP server that provides nix tooling (unwrapped)";
               };
             in
