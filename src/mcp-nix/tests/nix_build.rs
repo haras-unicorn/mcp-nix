@@ -7,7 +7,7 @@ fn build_package_returns_store_path() {
   for_each_flake(|fixture| {
     let package_ref = format!("{}#default", fixture.flake.dir.display());
 
-    let store_path = mcp_nix::build_package(&package_ref).unwrap();
+    let store_path = mcp_nix::build_package(&package_ref, false).unwrap();
 
     assert!(
       store_path.starts_with("/nix/store/"),
@@ -25,7 +25,7 @@ fn build_package_returns_error_for_bad_reference() {
   for_each_flake(|fixture| {
     let package_ref = format!("{}#does-not-exist", fixture.flake.dir.display());
 
-    let error = mcp_nix::build_package(&package_ref).unwrap_err();
+    let error = mcp_nix::build_package(&package_ref, false).unwrap_err();
 
     assert!(
       error.to_string().contains("nix build failed"),

@@ -10,6 +10,8 @@ Build a nix package and return the resulting nix store path.
 
 - `package` (string, required) - a nix package reference, for example
   `nixpkgs#hello`.
+- `show_trace` (boolean, optional) - pass `--show-trace` to `nix build` so that
+  evaluation errors include the full stack trace.
 
 ### Result
 
@@ -37,6 +39,8 @@ sandbox by default.
   `nixpkgs#hello`.
 - `program` (string, required) - the program to run from the built package, for
   example `hello`.
+- `show_trace` (boolean, optional) - pass `--show-trace` to the `nix build` step
+  so that evaluation errors include the full stack trace.
 - `args` (array of strings, optional) - arguments passed to the program.
 - `env` (object of strings, optional) - additional environment variables set for
   the program. The program runs in a sandbox with a clean environment, so these
@@ -76,6 +80,8 @@ by default.
   `devShells.<system>.default`.
 - `command` (string, required) - the command to run inside the dev shell, for
   example `cargo`.
+- `show_trace` (boolean, optional) - pass `--show-trace` to `nix print-dev-env`
+  so that evaluation errors include the full stack trace.
 - `args` (array of strings, optional) - arguments passed to the command.
 - `env` (object of strings, optional) - additional environment variables set for
   the command. The command runs in a sandbox with the dev shell environment, so
@@ -107,5 +113,36 @@ it for the tool to run.
 | ------------------- | ------- | ------- | -------------------------------- |
 | `path:./.`          | `cargo` | `build` | standard output of `cargo build` |
 | `path:./.#devshell` | `make`  | `test`  | standard output of `make test`   |
+
+## `nix_check`
+
+Check a nix flake for errors with `nix flake check`.
+
+### Parameters
+
+- `flake` (string, required) - a flake reference, for example `path:./.` or
+  `github:foo/bar`.
+- `all_systems` (boolean, optional) - check the flake's outputs for all systems,
+  not just the current one (passes `--all-systems`).
+- `no_build` (boolean, optional) - only check that the flake evaluates, without
+  building any derivations (passes `--no-build`).
+- `show_trace` (boolean, optional) - pass `--show-trace` so that evaluation
+  errors include the full stack trace.
+
+### Result
+
+On success the tool returns a text result containing the standard output of
+`nix flake check`.
+
+On failure the tool returns a text result with `isError` set and the
+`nix flake check` error output as its content.
+
+### Examples
+
+| Flake      | Options       | Result                           |
+| ---------- | ------------- | -------------------------------- |
+| `path:./.` | -             | success, no errors found         |
+| `path:./.` | `no_build`    | success, only evaluation checked |
+| `path:./.` | `all_systems` | success, all systems evaluated   |
 
 [bubblewrap]: https://github.com/containers/bubblewrap
