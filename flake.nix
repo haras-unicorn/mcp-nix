@@ -47,13 +47,13 @@
               cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
             in
             {
-              src = makePackages.cleanSourceWith {
+              src = pkgs.cleanSourceWith {
                 src = self;
                 filter =
                   path: type:
-                  (makePackages.hasSuffix ".rs" path)
-                  || (makePackages.hasSuffix ".toml" path)
-                  || (makePackages.hasSuffix ".lock" path)
+                  (pkgs.hasSuffix ".rs" path)
+                  || (pkgs.hasSuffix ".toml" path)
+                  || (pkgs.hasSuffix ".lock" path)
                   || (type == "directory");
               };
               MCP_NIX_NIXPKGS_REV = nixpkgsRev;
@@ -246,12 +246,12 @@
 
               app = {
                 type = "app";
-                program = makePackages.getExe packages.package;
+                program = pkgs.getExe packages.package;
                 meta.description = "MCP server that provides nix tooling";
               };
               unwrappedApp = {
                 type = "app";
-                program = makePackages.getExe packages.unwrapped;
+                program = pkgs.getExe packages.unwrapped;
                 meta.description = "MCP server that provides nix tooling (unwrapped)";
               };
             in
