@@ -124,6 +124,9 @@ pub struct RunOptions {
   /// The `MCP_NIX_COMMANDS` allow list: command file names that may be
   /// executed. Empty means any command is allowed.
   pub allowed_commands: Vec<String>,
+  /// Pass `--show-trace` to the nix build or `nix print-dev-env` step so that
+  /// nix evaluation errors include the full stack trace.
+  pub show_trace: bool,
 }
 
 /// Compute the environment set inside the sandbox for a command.

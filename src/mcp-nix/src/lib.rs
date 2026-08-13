@@ -24,7 +24,9 @@ use rmcp::schemars;
 use rmcp::tool;
 use rmcp::tool_router;
 
-pub use nix::{NixError, build_package, develop, run_package};
+pub use nix::{
+  CheckOptions, NixError, build_package, check_flake, develop, run_package,
+};
 pub use sandbox::{RunOptions, run_program};
 
 /// Parameters for the `nix_build` tool.
@@ -35,6 +37,13 @@ pub struct BuildParams {
     description = "A nix package reference, for example `nixpkgs#hello`."
   )]
   pub package: String,
+  /// Pass `--show-trace` to `nix build` so that evaluation errors include the
+  /// full stack trace.
+  #[schemars(
+    description = "Pass `--show-trace` to `nix build` so that evaluation errors include the full stack trace."
+  )]
+  #[serde(default)]
+  pub show_trace: bool,
 }
 
 /// Parameters for the `nix_run` tool.
@@ -45,6 +54,13 @@ pub struct RunParams {
     description = "A nix package reference, for example `nixpkgs#hello`."
   )]
   pub package: String,
+  /// Pass `--show-trace` to the `nix build` step so that evaluation errors
+  /// include the full stack trace.
+  #[schemars(
+    description = "Pass `--show-trace` to the `nix build` step so that evaluation errors include the full stack trace."
+  )]
+  #[serde(default)]
+  pub show_trace: bool,
   /// The program to run from the built package, for example `hello`.
   #[schemars(
     description = "The program to run from the built package, for example `hello`."
@@ -76,6 +92,13 @@ pub struct DevelopParams {
     description = "A flake reference, for example `path:./.` or `github:foo/bar#some-devshell`. The dev shell defaults to `devShells.<system>.default`."
   )]
   pub flake: String,
+  /// Pass `--show-trace` to `nix print-dev-env` so that evaluation errors
+  /// include the full stack trace.
+  #[schemars(
+    description = "Pass `--show-trace` to `nix print-dev-env` so that evaluation errors include the full stack trace."
+  )]
+  #[serde(default)]
+  pub show_trace: bool,
   /// The command to run inside the dev shell, for example `cargo`.
   #[schemars(
     description = "The command to run inside the dev shell, for example `cargo`."
@@ -99,6 +122,35 @@ pub struct DevelopParams {
   pub cwd: Option<String>,
 }
 
+/// Parameters for the `nix_check` tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CheckParams {
+  /// A flake reference, for example `path:./.` or `github:foo/bar`.
+  #[schemars(
+    description = "A flake reference, for example `path:./.` or `github:foo/bar`."
+  )]
+  pub flake: String,
+  /// Check the flake's outputs for all systems, not just the current one.
+  #[schemars(
+    description = "Check the flake's outputs for all systems, not just the current one (passes `--all-systems`)."
+  )]
+  #[serde(default)]
+  pub all_systems: bool,
+  /// Only check that the flake evaluates, without building any derivations.
+  #[schemars(
+    description = "Only check that the flake evaluates, without building any derivations (passes `--no-build`)."
+  )]
+  #[serde(default)]
+  pub no_build: bool,
+  /// Pass `--show-trace` to `nix flake check` so that evaluation errors include
+  /// the full stack trace.
+  #[schemars(
+    description = "Pass `--show-trace` to `nix flake check` so that evaluation errors include the full stack trace."
+  )]
+  #[serde(default)]
+  pub show_trace: bool,
+}
+
 /// MCP server that provides nix tooling.
 #[derive(Debug, Clone)]
 pub struct NixServer;
@@ -112,8 +164,13 @@ impl NixServer {
     Parameters(params): Parameters<BuildParams>,
   ) -> Result<CallToolResult, ErrorData> {
     let package = params.package;
+    let show_trace = params.show_trace;
 
-    match tokio::task::spawn_blocking(move || build_package(&package)).await {
+    match tokio::task::spawn_blocking(move || {
+      build_package(&package, show_trace)
+    })
+    .await
+    {
       Ok(Ok(store_path)) => {
         Ok(CallToolResult::success(vec![ContentBlock::text(
           store_path,
@@ -143,6 +200,7 @@ impl NixServer {
       args,
       env,
       cwd,
+      show_trace,
     } = params;
 
     match tokio::task::spawn_blocking(move || {
@@ -152,6 +210,7 @@ impl NixServer {
         cwd,
         sandbox: sandbox::sandbox_args(),
         allowed_commands: sandbox::allowed_commands(),
+        show_trace,
       };
       run_package(&package, &program, &options)
     })
@@ -184,6 +243,7 @@ impl NixServer {
       args,
       env,
       cwd,
+      show_trace,
     } = params;
 
     match tokio::task::spawn_blocking(move || {
@@ -193,10 +253,45 @@ impl NixServer {
         cwd,
         sandbox: sandbox::sandbox_args(),
         allowed_commands: sandbox::allowed_commands(),
+        show_trace,
       };
       develop(&flake, &command, &options)
     })
     .await
+    {
+      Ok(Ok(output)) => {
+        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+      }
+      Ok(Err(error)) => Ok(CallToolResult::error(vec![ContentBlock::text(
+        error.to_string(),
+      )])),
+      Err(join_error) => {
+        Err(ErrorData::internal_error(join_error.to_string(), None))
+      }
+    }
+  }
+
+  /// Check a nix flake for errors with `nix flake check`.
+  #[tool(description = "Check a nix flake for errors with nix flake check.")]
+  async fn nix_check(
+    &self,
+    Parameters(params): Parameters<CheckParams>,
+  ) -> Result<CallToolResult, ErrorData> {
+    let CheckParams {
+      flake,
+      all_systems,
+      no_build,
+      show_trace,
+    } = params;
+
+    let options = CheckOptions {
+      all_systems,
+      no_build,
+      show_trace,
+    };
+
+    match tokio::task::spawn_blocking(move || check_flake(&flake, &options))
+      .await
     {
       Ok(Ok(output)) => {
         Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
