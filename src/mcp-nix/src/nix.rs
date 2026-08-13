@@ -393,7 +393,9 @@ mod tests {
     assert_eq!(
       build_args("nixpkgs#hello", false),
       vec!["build", "--no-link", "--print-out-paths", "nixpkgs#hello"]
-        .into_iter().map(String::from).collect::<Vec<_>>()
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>()
     );
   }
 
@@ -405,7 +407,9 @@ mod tests {
     assert_eq!(
       args[..args.len().saturating_sub(1)],
       vec!["build", "--no-link", "--print-out-paths", "nixpkgs#hello"]
-        .into_iter().map(String::from).collect::<Vec<_>>()
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>()
     );
   }
 
@@ -413,7 +417,10 @@ mod tests {
   fn print_dev_env_args_pass_no_flags_by_default() {
     assert_eq!(
       print_dev_env_args("path:./.", false),
-      vec!["print-dev-env", "path:./.", "--json"].into_iter().map(String::from).collect::<Vec<_>>()
+      vec!["print-dev-env", "path:./.", "--json"]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>()
     );
   }
 
@@ -424,7 +431,10 @@ mod tests {
     assert_eq!(args.last().map(String::as_str), Some("--show-trace"));
     assert_eq!(
       args[..args.len().saturating_sub(1)],
-      vec!["print-dev-env", "path:./.", "--json"].into_iter().map(String::from).collect::<Vec<_>>()
+      vec!["print-dev-env", "path:./.", "--json"]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>()
     );
   }
 
@@ -432,7 +442,10 @@ mod tests {
   fn check_args_pass_no_flags_by_default() {
     assert_eq!(
       check_args("path:./.", &CheckOptions::default()),
-      vec!["flake", "check", "path:./."].into_iter().map(String::from).collect::<Vec<_>>()
+      vec!["flake", "check", "path:./."]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>()
     );
   }
 
@@ -481,7 +494,9 @@ mod tests {
         "--no-build",
         "--show-trace"
       ]
-      .into_iter().map(String::from).collect::<Vec<_>>()
+      .into_iter()
+      .map(String::from)
+      .collect::<Vec<_>>()
     );
   }
 }

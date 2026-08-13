@@ -18,6 +18,83 @@ or build the `mcp-nix` binary with:
 nix build github:haras-unicorn/mcp-nix
 ```
 
+### Releases
+
+Prebuilt binaries for `x86_64-linux` and `aarch64-linux` are attached to each
+[GitHub release] as tarballs containing the `mcp-nix` binary. The binary expects
+`nix` and `bubblewrap` to be available on `PATH`.
+
+```sh
+curl -L -o mcp-nix.tar.gz \
+  https://github.com/haras-unicorn/mcp-nix/releases/latest/download/mcp-nix-x86_64-linux.tar.gz
+tar -xzf mcp-nix.tar.gz
+./mcp-nix-x86_64-linux
+```
+
+[GitHub release]: https://github.com/haras-unicorn/mcp-nix/releases
+
+### NixOS and home-manager
+
+Add the flake as an input and apply its overlay so that `mcp-nix` is available
+in your system configuration:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    mcp-nix.url = "github:haras-unicorn/mcp-nix";
+  };
+
+  outputs =
+    { nixpkgs, mcp-nix, ... }:
+    {
+      nixosConfigurations.my-machine = nixpkgs.lib.nixosSystem {
+        modules = [
+          { nixpkgs.overlays = [ mcp-nix.overlays.default ]; }
+        ];
+      };
+    };
+}
+```
+
+Then add `pkgs.mcp-nix` to your packages, either in NixOS:
+
+```nix
+{ pkgs, ... }:
+{
+  environment.systemPackages = [ pkgs.mcp-nix ];
+}
+```
+
+or with home-manager:
+
+```nix
+{ pkgs, ... }:
+{
+  home.packages = [ pkgs.mcp-nix ];
+}
+```
+
+### Binary cache
+
+Builds are cached on the [haras cachix cache]. When the flake is used directly
+(for example with `nix run github:haras-unicorn/mcp-nix`), the cache is
+configured automatically through the flake's `nixConfig`. To use it when the
+package comes from an overlay, add the following to your nix configuration:
+
+```nix
+{
+  nix.settings = {
+    substituters = [ "https://haras.cachix.org" ];
+    trusted-public-keys = [
+      "haras.cachix.org-1:/HIo1JYqOIH1Nwk1EGXhuPPvDW0WekxIbY5CiXUZbYw="
+    ];
+  };
+}
+```
+
+[haras cachix cache]: https://app.cachix.org/cache/haras
+
 ## Usage
 
 `mcp-nix` is an MCP server that speaks the Model Context Protocol over stdio.
@@ -135,6 +212,10 @@ does not.
 [bubblewrap]: https://github.com/containers/bubblewrap
 
 <!-- ANCHOR_END: body -->
+
+## Documentation
+
+The documentation is available at <https://haras-unicorn.github.io/mcp-nix/>.
 
 ## Sandbox configuration
 
