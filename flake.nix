@@ -84,6 +84,7 @@
                   mcp-nix-unwrapped,
                   nix,
                   bubblewrap,
+                  bash,
                 }:
                 symlinkJoin {
                   name = "mcp-nix";
@@ -96,6 +97,7 @@
                         lib.makeBinPath [
                           nix
                           bubblewrap
+                          bash
                         ]
                       }
                   '';

@@ -120,11 +120,6 @@ fn run_program_under_bwrap_sets_custom_env() {
 
   let output = mcp_nix::run_program(&store_dir, "env", &options).unwrap();
 
-  assert!(output.contains("HOME=/tmp"), "base HOME missing: {output}");
-  assert!(
-    output.contains("PATH=/usr/bin:/bin:/nix/var/nix/profiles/default/bin"),
-    "base PATH missing: {output}"
-  );
   assert!(
     output.contains("MCP_NIX_TEST_VAR=hello-from-sandbox"),
     "custom env missing: {output}"

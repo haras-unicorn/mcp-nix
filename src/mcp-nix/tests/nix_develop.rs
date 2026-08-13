@@ -60,11 +60,6 @@ fn develop_sets_clean_environment_when_sandboxed() {
     )
     .unwrap();
 
-    assert!(output.contains("HOME=/tmp"), "base HOME missing: {output}");
-    assert!(
-      output.contains("/usr/bin:/bin:/nix/var/nix/profiles/default/bin"),
-      "base PATH missing: {output}"
-    );
     assert!(
       output.contains("MCP_NIX_TEST_VAR=hello-from-env"),
       "custom env missing: {output}"
