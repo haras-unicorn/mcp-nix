@@ -27,6 +27,8 @@
       makePackages =
         pkgs:
         let
+          lib = pkgs.lib;
+
           rust = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.latest.default.override {
             extensions = [
               "rustfmt"
@@ -47,13 +49,13 @@
               cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
             in
             {
-              src = pkgs.lib.cleanSourceWith {
+              src = lib.cleanSourceWith {
                 src = self;
                 filter =
                   path: type:
-                  (pkgs.hasSuffix ".rs" path)
-                  || (pkgs.hasSuffix ".toml" path)
-                  || (pkgs.hasSuffix ".lock" path)
+                  (lib.hasSuffix ".rs" path)
+                  || (lib.hasSuffix ".toml" path)
+                  || (lib.hasSuffix ".lock" path)
                   || (type == "directory");
               };
               MCP_NIX_NIXPKGS_REV = nixpkgsRev;
