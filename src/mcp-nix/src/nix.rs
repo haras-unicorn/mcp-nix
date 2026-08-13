@@ -1,10 +1,32 @@
 //! Wrappers around `nix` commands.
 
-use crate::sandbox;
-use crate::sandbox::SandboxError;
+use std::collections::HashMap;
 use std::process::Command;
 
-/// Errors produced while building a nix package.
+use crate::sandbox;
+use crate::sandbox::SandboxError;
+
+/// Environment variables a dev shell must not override, matching `nix develop`.
+const IGNORED_DEV_ENV: &[&str] = &[
+  "BASHOPTS",
+  "HOME",
+  "NIX_BUILD_TOP",
+  "NIX_ENFORCE_PURITY",
+  "NIX_LOG_FD",
+  "NIX_REMOTE",
+  "PPID",
+  "SHELLOPTS",
+  "SSL_CERT_FILE",
+  "TEMP",
+  "TEMPDIR",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "UID",
+];
+
+/// Errors produced while building a nix package or entering a dev shell.
 #[derive(Debug, thiserror::Error)]
 pub enum NixError {
   /// Failed to spawn the `nix` binary.
@@ -23,9 +45,29 @@ pub enum NixError {
   /// `nix build` printed nothing to stdout.
   #[error("nix build produced no output")]
   EmptyOutput,
+  /// `nix print-dev-env` exited with a non-zero status.
+  #[error("failed to capture the dev shell environment:\n{stderr}")]
+  DevelopEnv {
+    /// The standard error output of the `nix` command.
+    stderr: String,
+  },
+  /// The output of `nix print-dev-env` could not be parsed.
+  #[error("failed to parse the dev shell environment")]
+  DevelopEnvParse,
   /// Failed to run a program from the built package.
   #[error("failed to run the built package: {0}")]
   Run(#[source] SandboxError),
+  /// Failed to set up the sandbox for a dev shell command.
+  #[error("failed to set up the dev shell sandbox: {0}")]
+  DevelopSandbox(#[source] SandboxError),
+  /// The command run inside the dev shell exited with a non-zero status.
+  #[error("command {program} failed:\n{stderr}")]
+  CommandFailed {
+    /// The command being run.
+    program: String,
+    /// The standard error output of the command.
+    stderr: String,
+  },
 }
 
 /// Build the given nix package and return its nix store path.
@@ -58,4 +100,182 @@ pub fn run_package(
 ) -> Result<String, NixError> {
   let store_path = build_package(package)?;
   sandbox::run_program(&store_path, program, options).map_err(NixError::Run)
+}
+
+/// The dev shell environment captured with `nix print-dev-env`.
+struct DevShellEnv {
+  /// Environment variables as name/value pairs.
+  vars: Vec<(String, String)>,
+  /// Shell functions as name/body pairs.
+  bash_functions: Vec<(String, String)>,
+}
+
+/// The JSON output of `nix print-dev-env --json`.
+#[derive(Debug, serde::Deserialize)]
+struct PrintDevEnv {
+  #[serde(default)]
+  variables: HashMap<String, Variable>,
+  #[serde(default)]
+  bash_functions: HashMap<String, String>,
+}
+
+/// A variable in the output of `nix print-dev-env --json`.
+#[derive(Debug, serde::Deserialize)]
+struct Variable {
+  #[serde(rename = "type")]
+  ty: String,
+  value: serde_json::Value,
+}
+
+impl Variable {
+  /// Convert the variable to a string value, as bash would expand it.
+  fn string_value(&self) -> Option<String> {
+    match self.ty.as_str() {
+      "var" | "exported" => self.value.as_str().map(str::to_string),
+      "array" => Some(
+        self
+          .value
+          .as_array()?
+          .iter()
+          .filter_map(serde_json::Value::as_str)
+          .collect::<Vec<_>>()
+          .join(" "),
+      ),
+      _ => None,
+    }
+  }
+}
+
+/// Capture the dev shell environment of the given flake with `nix print-dev-env`.
+///
+/// The command inherits the environment of the server, so that the user's nix
+/// configuration applies.
+fn capture_dev_env(
+  nix: &str,
+  flake: &str,
+  options: &sandbox::RunOptions,
+) -> Result<DevShellEnv, NixError> {
+  let mut process = Command::new(nix);
+  if let Some(cwd) = &options.cwd {
+    process.current_dir(cwd);
+  }
+  process.args(["print-dev-env", flake, "--json"]);
+
+  let output = process
+    .output()
+    .map_err(|source| NixError::Spawn { source })?;
+
+  if !output.status.success() {
+    return Err(NixError::DevelopEnv {
+      stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    });
+  }
+
+  parse_dev_env(&output.stdout)
+}
+
+fn parse_dev_env(stdout: &[u8]) -> Result<DevShellEnv, NixError> {
+  let env: PrintDevEnv =
+    serde_json::from_slice(stdout).map_err(|_| NixError::DevelopEnvParse)?;
+
+  let mut vars = Vec::new();
+  for (name, variable) in env.variables {
+    if IGNORED_DEV_ENV.contains(&name.as_str()) {
+      continue;
+    }
+    let Some(value) = variable.string_value() else {
+      continue;
+    };
+    vars.push((name, value));
+  }
+
+  Ok(DevShellEnv {
+    vars,
+    bash_functions: env.bash_functions.into_iter().collect(),
+  })
+}
+
+/// Build the command that runs in the dev shell.
+///
+/// When the shell defines functions or a shell hook, the command runs through a
+/// bash wrapper that defines the functions, runs the `shellHook` and then
+/// `exec`s the command. The command itself is never interpreted by the shell.
+fn dev_command(
+  bash: &str,
+  command: &str,
+  args: &[String],
+  env: &DevShellEnv,
+) -> (String, Vec<String>) {
+  let has_hook = env.vars.iter().any(|(name, _)| name == "shellHook");
+  if env.bash_functions.is_empty() && !has_hook {
+    return (command.to_string(), args.to_vec());
+  }
+
+  let mut script = String::new();
+  for (name, body) in &env.bash_functions {
+    script.push_str(&format!("{name} ()\n{{\n{body}\n}}\n"));
+  }
+  script.push_str("eval \"${shellHook:-}\"\n");
+  script.push_str("exec \"$@\"\n");
+
+  let mut argv = vec![
+    "-c".to_string(),
+    script,
+    bash.to_string(),
+    command.to_string(),
+  ];
+  argv.extend(args.iter().cloned());
+
+  (bash.to_string(), argv)
+}
+
+/// Enter the dev shell of the given flake and run a command in it, returning
+/// the command's standard output.
+///
+/// The dev shell environment is captured with `nix print-dev-env`, which
+/// inherits the environment of the server so that the user's nix configuration
+/// applies. The command then runs with that environment, optionally wrapped in
+/// the configured bubblewrap sandbox; the dev shell `shellHook` (and any shell
+/// functions) run inside the sandbox before the command.
+pub fn develop(
+  flake: &str,
+  command: &str,
+  options: &sandbox::RunOptions,
+) -> Result<String, NixError> {
+  let nix = sandbox::resolve_on_path("nix")
+    .map_err(|source| NixError::Spawn { source })?;
+  let bash = sandbox::resolve_on_path("bash")
+    .map_err(|source| NixError::Spawn { source })?;
+
+  let dev_env = capture_dev_env(&nix, flake, options)?;
+
+  let mut vars = dev_env.vars;
+  vars.push(("SHELL".to_string(), bash.clone()));
+  let env = DevShellEnv {
+    vars,
+    bash_functions: dev_env.bash_functions,
+  };
+
+  let (effective_command, effective_args) =
+    dev_command(&bash, command, &options.args, &env);
+
+  let argv = sandbox::sandboxed_argv(
+    &effective_command,
+    &effective_args,
+    options,
+    &env.vars,
+  )
+  .map_err(NixError::DevelopSandbox)?;
+
+  let overlay = sandbox::merged_env(&env.vars, options, false);
+
+  sandbox::run_command_argv(&argv, options, &overlay, command).map_err(
+    |error| match error {
+      SandboxError::Failed { stderr, .. } => NixError::CommandFailed {
+        program: command.to_string(),
+        stderr,
+      },
+      other => NixError::DevelopSandbox(other),
+    },
+  )
 }

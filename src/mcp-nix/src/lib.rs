@@ -13,6 +13,7 @@
 
 mod nix;
 mod sandbox;
+mod sandbox_defaults;
 
 use std::collections::HashMap;
 
@@ -23,7 +24,7 @@ use rmcp::schemars;
 use rmcp::tool;
 use rmcp::tool_router;
 
-pub use nix::{NixError, build_package, run_package};
+pub use nix::{NixError, build_package, develop, run_package};
 pub use sandbox::{RunOptions, run_program};
 
 /// Parameters for the `nix_build` tool.
@@ -55,13 +56,44 @@ pub struct RunParams {
   pub args: Vec<String>,
   /// Additional environment variables set for the program.
   #[schemars(
-    description = "Additional environment variables set for the program. The program runs with a cleared environment, so these supplement the minimal base environment."
+    description = "Additional environment variables set for the program. The program runs in a sandbox with a clean environment, so these supplement the minimal base environment."
   )]
   #[serde(default)]
   pub env: HashMap<String, String>,
   /// The working directory for the program.
   #[schemars(
     description = "The working directory for the program. Inside the sandbox it must be visible, for example `/tmp`."
+  )]
+  #[serde(default)]
+  pub cwd: Option<String>,
+}
+
+/// Parameters for the `nix_develop` tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DevelopParams {
+  /// A flake reference, for example `path:./.` or `github:foo/bar#some-devshell`.
+  #[schemars(
+    description = "A flake reference, for example `path:./.` or `github:foo/bar#some-devshell`. The dev shell defaults to `devShells.<system>.default`."
+  )]
+  pub flake: String,
+  /// The command to run inside the dev shell, for example `cargo`.
+  #[schemars(
+    description = "The command to run inside the dev shell, for example `cargo`."
+  )]
+  pub command: String,
+  /// Arguments passed to the command.
+  #[schemars(description = "Arguments passed to the command.")]
+  #[serde(default)]
+  pub args: Vec<String>,
+  /// Additional environment variables set for the command.
+  #[schemars(
+    description = "Additional environment variables set for the command. The command runs in a sandbox with the dev shell environment, so these supplement it."
+  )]
+  #[serde(default)]
+  pub env: HashMap<String, String>,
+  /// The working directory for the command.
+  #[schemars(
+    description = "The working directory for the command. Inside the sandbox it must be visible, for example `/tmp`."
   )]
   #[serde(default)]
   pub cwd: Option<String>,
@@ -121,6 +153,46 @@ impl NixServer {
         sandbox: sandbox::sandbox_args(),
       };
       run_package(&package, &program, &options)
+    })
+    .await
+    {
+      Ok(Ok(output)) => {
+        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+      }
+      Ok(Err(error)) => Ok(CallToolResult::error(vec![ContentBlock::text(
+        error.to_string(),
+      )])),
+      Err(join_error) => {
+        Err(ErrorData::internal_error(join_error.to_string(), None))
+      }
+    }
+  }
+
+  /// Enter a nix dev shell and run one of its commands, wrapped in a bubblewrap
+  /// sandbox.
+  #[tool(
+    description = "Enter a nix dev shell and run one of its commands, wrapped in a bubblewrap sandbox."
+  )]
+  async fn nix_develop(
+    &self,
+    Parameters(params): Parameters<DevelopParams>,
+  ) -> Result<CallToolResult, ErrorData> {
+    let DevelopParams {
+      flake,
+      command,
+      args,
+      env,
+      cwd,
+    } = params;
+
+    match tokio::task::spawn_blocking(move || {
+      let options = RunOptions {
+        args,
+        env,
+        cwd,
+        sandbox: sandbox::sandbox_args(),
+      };
+      develop(&flake, &command, &options)
     })
     .await
     {

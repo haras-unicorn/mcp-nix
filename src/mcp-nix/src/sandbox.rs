@@ -1,9 +1,12 @@
-//! Sandboxing of programs run from built nix packages.
+//! Sandboxing of programs run from built nix packages and dev shells.
 
 use std::collections::HashMap;
 use std::process::Command;
 
-/// Errors produced while running a program from a built nix package.
+pub use crate::sandbox_defaults::{BASE_ENV, DEFAULT_SANDBOX_ARGS};
+
+/// Errors produced while running a program from a built nix package or a dev
+/// shell command.
 #[derive(Debug, thiserror::Error)]
 pub enum SandboxError {
   /// Failed to spawn the sandboxed program.
@@ -32,24 +35,7 @@ pub enum SandboxError {
     /// The standard error output of the program.
     stderr: String,
   },
-  /// The program printed nothing to stdout.
-  #[error("{program} produced no output")]
-  EmptyOutput {
-    /// The program being run.
-    program: String,
-  },
 }
-
-/// The default bubblewrap arguments, used when `MCP_NIX_SANDBOX` is unset.
-///
-/// Network is restricted: the package is built with `nix build` outside the
-/// sandbox, and the program run inside the sandbox is not expected to need the
-/// network.
-pub const DEFAULT_SANDBOX_ARGS: &str = "\
---die-with-parent --unshare-user --unshare-ipc --unshare-pid --unshare-net \
---ro-bind /nix /nix --ro-bind /etc /etc \
---ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
---tmpfs /tmp --tmpfs /home --tmpfs /run --proc /proc --dev /dev";
 
 /// Parse the value of the `MCP_NIX_SANDBOX` environment variable.
 ///
@@ -77,19 +63,8 @@ pub fn sandbox_args() -> Option<Vec<String>> {
   parse_sandbox_args(std::env::var("MCP_NIX_SANDBOX").ok().as_deref())
 }
 
-/// The minimal environment always set for programs run from built packages.
-///
-/// The full environment is cleared before running a program, so that it does
-/// not inherit the environment of the MCP server. Only these variables are set
-/// by default; additional variables can be provided per invocation.
-pub const BASE_ENV: &[(&str, &str)] = &[
-  ("HOME", "/tmp"),
-  ("LANG", "C.UTF-8"),
-  ("PATH", "/usr/bin:/bin:/nix/var/nix/profiles/default/bin"),
-  ("TMPDIR", "/tmp"),
-];
-
-/// Options for running a program from a built nix package.
+/// Options for running a program from a built nix package or a dev shell
+/// command.
 #[derive(Debug, Default)]
 pub struct RunOptions {
   /// Arguments passed to the program.
@@ -102,32 +77,72 @@ pub struct RunOptions {
   pub sandbox: Option<Vec<String>>,
 }
 
-/// Resolve `bwrap` to an absolute path using the current process's `PATH`.
+/// Compute the environment set inside the sandbox for a command.
 ///
-/// The program runs with a cleared environment, so `bwrap` must be located
-/// before its own `PATH` is cleared.
-fn resolve_bwrap() -> Result<String, SandboxError> {
-  let path =
-    std::env::var_os("PATH").ok_or_else(|| SandboxError::SandboxSpawn {
-      source: std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "PATH is not set",
-      ),
-    })?;
+/// - `extra` provides an additional environment, for example a captured dev
+///   shell environment; a `PATH` in it is merged with the base `PATH`;
+/// - the custom environment in [`RunOptions::env`] always wins.
+///
+/// When `base` is true the minimal [`BASE_ENV`] is included first. When `base`
+/// is false only `extra` and the custom environment are included, used to
+/// overlay a dev shell environment on an unsandboxed command that otherwise
+/// inherits the environment of the server.
+pub fn merged_env(
+  extra: &[(String, String)],
+  options: &RunOptions,
+  base: bool,
+) -> Vec<(String, String)> {
+  let mut env: Vec<(String, String)> = if base {
+    BASE_ENV
+      .iter()
+      .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+      .collect()
+  } else {
+    Vec::new()
+  };
+
+  for (key, value) in extra {
+    if key == "PATH" && base {
+      let base_path = env
+        .iter()
+        .find(|(existing, _)| existing == key)
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default();
+      env.push(("PATH".to_string(), format!("{value}:{base_path}")));
+    } else {
+      env.push((key.clone(), value.clone()));
+    }
+  }
+
+  for (key, value) in &options.env {
+    env.retain(|(existing, _)| existing != key);
+    env.push((key.clone(), value.clone()));
+  }
+
+  env
+}
+
+/// Resolve an executable to an absolute path using the current process's
+/// `PATH`.
+///
+/// The program runs with a cleared environment, so executables must be located
+/// before their own `PATH` is cleared.
+pub fn resolve_on_path(program: &str) -> Result<String, std::io::Error> {
+  let path = std::env::var_os("PATH").ok_or_else(|| {
+    std::io::Error::new(std::io::ErrorKind::NotFound, "PATH is not set")
+  })?;
 
   for dir in std::env::split_paths(&path) {
-    let candidate = dir.join("bwrap");
+    let candidate = dir.join(program);
     if is_executable(&candidate) {
       return Ok(candidate.to_string_lossy().into_owned());
     }
   }
 
-  Err(SandboxError::SandboxSpawn {
-    source: std::io::Error::new(
-      std::io::ErrorKind::NotFound,
-      "bwrap not found on PATH",
-    ),
-  })
+  Err(std::io::Error::new(
+    std::io::ErrorKind::NotFound,
+    format!("{program} not found on PATH"),
+  ))
 }
 
 fn is_executable(path: &std::path::Path) -> bool {
@@ -137,55 +152,85 @@ fn is_executable(path: &std::path::Path) -> bool {
   })
 }
 
-/// Run a program from a built nix package, optionally wrapped in a bubblewrap
-/// sandbox, and return its standard output.
-///
-/// The program runs with a cleared environment containing only [`BASE_ENV`]
-/// plus the variables in [`RunOptions::env`].
-pub fn run_program(
-  store_path: &str,
-  program: &str,
-  options: &RunOptions,
-) -> Result<String, SandboxError> {
-  let bin = format!("{store_path}/bin/{program}");
-  let sandboxed = options.sandbox.is_some();
+fn resolve_bwrap() -> Result<String, SandboxError> {
+  resolve_on_path("bwrap")
+    .map_err(|source| SandboxError::SandboxSpawn { source })
+}
 
-  let mut command = match &options.sandbox {
+/// Build the argument vector for running `command` with `args`, wrapped in the
+/// configured sandbox.
+///
+/// When [`RunOptions::sandbox`] is `Some`, `bwrap` is resolved to an absolute
+/// path and prepended together with the sandbox arguments, `--clearenv`,
+/// `--setenv` pairs for [`merged_env`], an optional `--chdir`, the command and
+/// its arguments. When it is `None`, the command and its arguments are returned
+/// directly.
+pub fn sandboxed_argv(
+  command: &str,
+  args: &[String],
+  options: &RunOptions,
+  extra_env: &[(String, String)],
+) -> Result<Vec<String>, SandboxError> {
+  match &options.sandbox {
     Some(bwrap_args) => {
       let bwrap = resolve_bwrap()?;
-      let mut args: Vec<String> = bwrap_args.to_vec();
-      if let Some(cwd) = &options.cwd {
-        args.push("--chdir".to_string());
-        args.push(cwd.clone());
+      let mut argv = Vec::new();
+      argv.push(bwrap);
+      argv.extend(bwrap_args.iter().cloned());
+      argv.push("--clearenv".to_string());
+      for (key, value) in merged_env(extra_env, options, true) {
+        argv.push("--setenv".to_string());
+        argv.push(key);
+        argv.push(value);
       }
-      args.push(bin.clone());
-      args.extend(options.args.iter().cloned());
-      let mut command = Command::new(bwrap);
-      command.args(args);
-      command
+      if let Some(cwd) = &options.cwd {
+        argv.push("--chdir".to_string());
+        argv.push(cwd.clone());
+      }
+      argv.push(command.to_string());
+      argv.extend(args.iter().cloned());
+      Ok(argv)
     }
     None => {
-      let mut command = Command::new(&bin);
-      if let Some(cwd) = &options.cwd {
-        command.current_dir(cwd);
-      }
-      command.args(&options.args);
-      command
+      let mut argv = Vec::new();
+      argv.push(command.to_string());
+      argv.extend(args.iter().cloned());
+      Ok(argv)
     }
-  };
-
-  command.env_clear();
-  command.envs(BASE_ENV.iter().copied());
-  for (key, value) in &options.env {
-    command.env(key, value);
   }
+}
 
-  let output = command.output().map_err(|source| {
+/// Run the given argument vector, optionally wrapped in a bubblewrap sandbox,
+/// and return its standard output.
+///
+/// When sandboxed the environment is controlled by the `--clearenv`/`--setenv`
+/// arguments in `argv`. When unsandboxed the command inherits the environment
+/// of the server, with `overlay` applied on top.
+pub fn run_command_argv(
+  argv: &[String],
+  options: &RunOptions,
+  overlay: &[(String, String)],
+  program: &str,
+) -> Result<String, SandboxError> {
+  let sandboxed = options.sandbox.is_some();
+
+  let mut process = Command::new(&argv[0]);
+  if let Some(cwd) = &options.cwd {
+    process.current_dir(cwd);
+  }
+  if !sandboxed {
+    for (key, value) in overlay {
+      process.env(key, value);
+    }
+  }
+  process.args(&argv[1..]);
+
+  let output = process.output().map_err(|source| {
     if sandboxed {
       SandboxError::SandboxSpawn { source }
     } else {
       SandboxError::Spawn {
-        program: bin.clone(),
+        program: program.to_string(),
         source,
       }
     }
@@ -193,17 +238,49 @@ pub fn run_program(
 
   if !output.status.success() {
     return Err(SandboxError::Failed {
-      program: bin,
+      program: program.to_string(),
       stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     });
   }
 
-  let stdout = String::from_utf8_lossy(&output.stdout);
-  let stdout = stdout.trim();
-  if stdout.is_empty() {
-    return Err(SandboxError::EmptyOutput { program: bin });
-  }
-  Ok(stdout.to_string())
+  Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Run an arbitrary command, optionally wrapped in a bubblewrap sandbox, and
+/// return its standard output.
+///
+/// When sandboxed the command runs with a clean environment: only [`BASE_ENV`]
+/// plus the variables in [`RunOptions::env`]. When unsandboxed it inherits the
+/// environment of the server, with the variables in [`RunOptions::env`] applied
+/// on top.
+pub fn run_sandboxed(
+  command: &str,
+  args: &[String],
+  options: &RunOptions,
+) -> Result<String, SandboxError> {
+  let argv = sandboxed_argv(command, args, options, &[])?;
+  let overlay: Vec<(String, String)> = options
+    .env
+    .iter()
+    .map(|(key, value)| (key.clone(), value.clone()))
+    .collect();
+  run_command_argv(&argv, options, &overlay, command)
+}
+
+/// Run a program from a built nix package, optionally wrapped in a bubblewrap
+/// sandbox, and return its standard output.
+///
+/// The program runs with a clean environment when sandboxed: only [`BASE_ENV`]
+/// plus the variables in [`RunOptions::env`]. When unsandboxed it inherits the
+/// environment of the server, with the variables in [`RunOptions::env`] applied
+/// on top.
+pub fn run_program(
+  store_path: &str,
+  program: &str,
+  options: &RunOptions,
+) -> Result<String, SandboxError> {
+  let bin = format!("{store_path}/bin/{program}");
+  run_sandboxed(&bin, &options.args, options)
 }
 
 #[cfg(test)]

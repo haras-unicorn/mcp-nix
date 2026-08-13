@@ -20,9 +20,12 @@ provides the following scripts:
 - `dev run` - run the MCP server over stdio.
 - `dev format` - format the repository.
 - `dev lint` - lint and test the repository.
+- `dev test` - check clippy warnings and run rust tests.
 
 ## Tests
 
 The test suite only assumes that `nix` is installed on the system. The
-integration tests build a self-contained flake written to a temporary directory,
-so they do not require network access.
+integration tests build self-contained flakes written to temporary directories,
+so they do not require network access. The dev shell tests pin their nixpkgs
+input to the revision locked in the repository's own `flake.lock`, which is
+already cached when running inside the default development shell.

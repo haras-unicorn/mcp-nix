@@ -19,3 +19,12 @@ ignoreWords:
   - sandboxing
   - TMPDIR
   - cwd
+  - devshell
+  - devshells
+  - clearenv
+  - setenv
+  - BASHOPTS
+  - PPID
+  - SHELLOPTS
+  - nixos
+  - clippy

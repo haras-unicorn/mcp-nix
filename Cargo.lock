@@ -286,6 +286,7 @@ dependencies = [
  "anyhow",
  "rmcp",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]

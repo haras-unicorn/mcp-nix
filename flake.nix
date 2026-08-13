@@ -24,6 +24,8 @@
       perSystem =
         { pkgs, lib, ... }:
         let
+          nixpkgsRev = inputs.nixpkgs.rev;
+
           rust = (inputs.rust-overlay.lib.mkRustBin { } pkgs).stable.latest.default.override {
             extensions = [
               "rustfmt"
@@ -99,6 +101,13 @@
               cargo clippy --fix --allow-dirty
             }
 
+            def "main test" [] {
+              if ($env.NIX_BUILD_TOP? | is-empty) {
+                cargo clippy -- -D warnings
+                cargo test
+              }
+            }
+
             def "main lint" [] {
               cd (flake-root)
               prettier --check .
@@ -139,6 +148,7 @@
                   || (lib.hasSuffix ".lock" path)
                   || (type == "directory");
               };
+              MCP_NIX_NIXPKGS_REV = nixpkgsRev;
               cargoBuildOptions =
                 prev:
                 prev
@@ -148,28 +158,45 @@
                 ];
               name = cargoToml.package.name;
               version = cargoToml.package.version;
+              meta.mainProgram = "mcp-nix";
             }
           );
 
-          package = pkgs.symlinkJoin {
-            name = "mcp-nix";
-            paths = [ unwrapped ];
-            buildInputs = [ pkgs.makeWrapper ];
-            meta.mainProgram = "mcp-nix";
-            postBuild = ''
-              wrapProgram $out/bin/mcp-nix \
-                --prefix PATH : ${
-                  lib.makeBinPath [
-                    pkgs.nix
-                    pkgs.bubblewrap
-                  ]
+          package =
+            pkgs.callPackage
+              (
+                {
+                  lib,
+                  makeWrapper,
+                  symlinkJoin,
+                  mcp-nix-unwrapped,
+                  nix,
+                  bubblewrap,
+                }:
+                symlinkJoin {
+                  name = "mcp-nix";
+                  paths = [ unwrapped ];
+                  buildInputs = [ makeWrapper ];
+                  meta.mainProgram = "mcp-nix";
+                  postBuild = ''
+                    wrapProgram $out/bin/mcp-nix \
+                      --prefix PATH : ${
+                        lib.makeBinPath [
+                          nix
+                          bubblewrap
+                        ]
+                      }
+                  '';
                 }
-            '';
-          };
+              )
+              {
+                mcp-nix-unwrapped = unwrapped;
+              };
         in
         {
           devShells.default = pkgs.mkShell {
             packages = external ++ [ devScript ];
+            MCP_NIX_NIXPKGS_REV = nixpkgsRev;
           };
 
           apps =
@@ -177,12 +204,19 @@
               app = {
                 type = "app";
                 program = lib.getExe package;
-                meta.description = "Secret generation tool";
+                meta.description = "MCP server that provides nix tooling";
+              };
+              unwrappedApp = {
+                type = "app";
+                program = lib.getExe unwrapped;
+                meta.description = "MCP server that provides nix tooling (unwrapped)";
               };
             in
             {
               default = app;
               mcp-nix = app;
+              unwrapped = unwrappedApp;
+              mcp-nix-unwrapped = unwrappedApp;
             };
 
           packages =
@@ -201,6 +235,8 @@
               inherit docs;
               default = package;
               mcp-nix = package;
+              unwrapped = unwrapped;
+              mcp-nix-unwrapped = unwrapped;
             };
         };
     };
