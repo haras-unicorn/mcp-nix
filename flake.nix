@@ -110,7 +110,7 @@
         "aarch64-linux"
       ];
 
-      overlays =
+      flake.overlays =
         let
           overlay =
             final: prev:
