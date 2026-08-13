@@ -350,7 +350,7 @@ mod tests {
   #[test]
   fn sandbox_args_defaults_restrict_network() {
     let args = parse_sandbox_args(None).unwrap_or_default();
-    assert!(args.contains(&"--unshare-net".to_string()));
+    assert!(args.contains(&"--unshare-all".to_string()));
   }
 
   #[test]
@@ -361,12 +361,14 @@ mod tests {
   #[test]
   fn sandbox_args_splits_on_whitespace() {
     assert_eq!(
-      parse_sandbox_args(Some("--die-with-parent --ro-bind /nix /nix")),
+      parse_sandbox_args(Some(
+        "--die-with-parent --ro-bind /nix/store /nix/store"
+      )),
       Some(vec![
         "--die-with-parent".to_string(),
         "--ro-bind".to_string(),
-        "/nix".to_string(),
-        "/nix".to_string(),
+        "/nix/store".to_string(),
+        "/nix/store".to_string(),
       ])
     );
   }

@@ -10,10 +10,13 @@
 /// network.
 // ANCHOR: default-sandbox
 pub const DEFAULT_SANDBOX_ARGS: &str = "\
---die-with-parent --unshare-user --unshare-ipc --unshare-pid --unshare-net \
---ro-bind /nix /nix --ro-bind /etc /etc \
---ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
---tmpfs /tmp --tmpfs /home --tmpfs /run --proc /proc --dev /dev";
+--die-with-parent --unshare-all \
+--ro-bind-try /nix/store /nix/store \
+--ro-bind /usr /usr \
+--ro-bind /bin /bin --ro-bind-try /sbin /sbin \
+--ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+--tmpfs /tmp \
+--proc /proc --dev /dev";
 // ANCHOR_END: default-sandbox
 
 /// The minimal environment set inside the sandbox for programs run from built
@@ -26,7 +29,7 @@ pub const DEFAULT_SANDBOX_ARGS: &str = "\
 pub const BASE_ENV: &[(&str, &str)] = &[
   ("HOME", "/tmp"),
   ("LANG", "C.UTF-8"),
-  ("PATH", "/usr/bin:/bin:/nix/var/nix/profiles/default/bin"),
+  ("PATH", "/usr/bin:/bin"),
   ("TMPDIR", "/tmp"),
 ];
 // ANCHOR_END: base-env
