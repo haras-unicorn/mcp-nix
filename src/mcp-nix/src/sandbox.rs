@@ -1,6 +1,7 @@
 //! Sandboxing of programs run from built nix packages and dev shells.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Command;
 
 pub use crate::sandbox_defaults::{BASE_ENV, DEFAULT_SANDBOX_ARGS};
@@ -63,6 +64,51 @@ pub fn sandbox_args() -> Option<Vec<String>> {
   parse_sandbox_args(std::env::var("MCP_NIX_SANDBOX").ok().as_deref())
 }
 
+/// Parse the value of the `MCP_NIX_COMMANDS` environment variable.
+///
+/// The variable holds a comma-separated list of command file names that may be
+/// executed. An unset or blank value yields an empty list, meaning no
+/// restriction; entries are trimmed and empty entries are skipped.
+pub fn parse_allowed_commands(value: Option<&str>) -> Vec<String> {
+  value
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(|value| {
+      value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// The `MCP_NIX_COMMANDS` environment variable of the current process.
+pub fn allowed_commands() -> Vec<String> {
+  parse_allowed_commands(std::env::var("MCP_NIX_COMMANDS").ok().as_deref())
+}
+
+/// The executable file name of a command path, for example `cargo` for
+/// `/nix/store/.../bin/cargo`.
+fn executable_name(command: &str) -> &str {
+  Path::new(command)
+    .file_name()
+    .and_then(|name| name.to_str())
+    .unwrap_or(command)
+}
+
+/// Whether the given command is allowed by the `MCP_NIX_COMMANDS` allow list.
+///
+/// An empty allow list allows any command. Otherwise the executable file name
+/// of `command` must match one of the entries.
+pub fn command_allowed(command: &str, allowed: &[String]) -> bool {
+  allowed.is_empty()
+    || allowed
+      .iter()
+      .any(|entry| entry.as_str() == executable_name(command))
+}
+
 /// Options for running a program from a built nix package or a dev shell
 /// command.
 #[derive(Debug, Default)]
@@ -75,6 +121,9 @@ pub struct RunOptions {
   pub cwd: Option<String>,
   /// Bubblewrap arguments, or `None` to run the program directly.
   pub sandbox: Option<Vec<String>>,
+  /// The `MCP_NIX_COMMANDS` allow list: command file names that may be
+  /// executed. Empty means any command is allowed.
+  pub allowed_commands: Vec<String>,
 }
 
 /// Compute the environment set inside the sandbox for a command.
@@ -317,5 +366,35 @@ mod tests {
         "/nix".to_string(),
       ])
     );
+  }
+
+  #[test]
+  fn allowed_commands_empty_when_unset_or_blank() {
+    assert!(parse_allowed_commands(None).is_empty());
+    assert!(parse_allowed_commands(Some("   ")).is_empty());
+    assert!(parse_allowed_commands(Some(",, ,")).is_empty());
+  }
+
+  #[test]
+  fn allowed_commands_splits_on_commas() {
+    assert_eq!(
+      parse_allowed_commands(Some("hello, cargo,  make")),
+      vec!["hello".to_string(), "cargo".to_string(), "make".to_string()]
+    );
+  }
+
+  #[test]
+  fn command_allowed_matches_executable_file_name() {
+    assert!(command_allowed("hello", &[]));
+    assert!(command_allowed("hello", &["hello".to_string()]));
+    assert!(command_allowed(
+      "/nix/store/abc/bin/cargo",
+      &["cargo".to_string()]
+    ));
+    assert!(!command_allowed("hello", &["hello2".to_string()]));
+    assert!(!command_allowed(
+      "/nix/store/abc/bin/cargo",
+      &["make".to_string()]
+    ));
   }
 }

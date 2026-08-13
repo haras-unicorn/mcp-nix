@@ -71,6 +71,13 @@ The sandbox is controlled by the `MCP_NIX_SANDBOX` environment variable:
 The default sandbox and the base environment are defined in
 [Sandbox configuration](#sandbox-configuration).
 
+The commands that may be executed are restricted by the `MCP_NIX_COMMANDS`
+environment variable, a comma-separated list of command file names. Before a
+`nix_run` program or a `nix_develop` command runs, its executable file name (for
+example `hello` or `cargo`) is checked against the list: when it does not match,
+the tool fails with an error and nothing is executed. The check applies whenever
+`MCP_NIX_COMMANDS` is set; when the variable is unset, any command is allowed.
+
 The nix store is bound read-only so that the built package, the `nix` client and
 dev shell tooling are reachable inside the sandbox. Network is disabled by
 default: the package is built (or the dev shell environment captured) outside

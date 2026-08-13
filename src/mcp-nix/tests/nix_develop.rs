@@ -175,6 +175,51 @@ fn develop_sandboxed_command_has_no_network() {
 }
 
 #[test]
+fn develop_rejects_command_not_in_allowed_commands() {
+  let options = RunOptions {
+    allowed_commands: vec!["some-other-command".to_string()],
+    ..Default::default()
+  };
+  let error =
+    mcp_nix::develop("path:./does-not-matter", "cargo", &options).unwrap_err();
+
+  assert!(
+    error.to_string().contains("MCP_NIX_COMMANDS"),
+    "unexpected error: {error}"
+  );
+}
+
+#[test]
+fn develop_runs_command_in_allowed_commands() {
+  if !bwrap_usable() {
+    return;
+  }
+  let Some(store_dir) = nix_store_dir() else {
+    eprintln!("skipping allow list test: nix is not in the nix store");
+    return;
+  };
+  for_each_flake(|fixture| {
+    let sandbox: Vec<String> =
+      TEST_BWRAP_ARGS.iter().map(|arg| arg.to_string()).collect();
+    let command = format!("{store_dir}/bin/nix");
+    let options = RunOptions {
+      args: vec!["--version".to_string()],
+      allowed_commands: vec!["nix".to_string()],
+      sandbox: Some(sandbox),
+      ..Default::default()
+    };
+    let output = mcp_nix::develop(
+      &fixture.flake.dir.display().to_string(),
+      &command,
+      &options,
+    )
+    .unwrap();
+
+    assert!(output.contains("nix"), "unexpected output: {output}");
+  });
+}
+
+#[test]
 fn develop_returns_error_for_failing_command() {
   for_each_flake(|fixture| {
     let command = "/bin/sh".to_string();
