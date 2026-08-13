@@ -154,6 +154,48 @@ fn run_program_under_bwrap_sets_working_directory() {
 }
 
 #[test]
+fn run_package_rejects_program_not_in_allowed_commands() {
+  let options = RunOptions {
+    allowed_commands: vec!["some-other-program".to_string()],
+    ..Default::default()
+  };
+  let error = mcp_nix::run_package("path:./does-not-matter", "hello", &options)
+    .unwrap_err();
+
+  assert!(
+    error.to_string().contains("MCP_NIX_COMMANDS"),
+    "unexpected error: {error}"
+  );
+}
+
+#[test]
+fn run_package_runs_program_in_allowed_commands() {
+  if !bwrap_usable() {
+    return;
+  }
+  for_each_flake(|fixture| {
+    let Some(program) = fixture.package_program else {
+      return;
+    };
+    let package_ref = format!("{}#default", fixture.flake.dir.display());
+    let sandbox: Vec<String> =
+      TEST_BWRAP_ARGS.iter().map(|arg| arg.to_string()).collect();
+    let options = RunOptions {
+      allowed_commands: vec![program.to_string()],
+      sandbox: Some(sandbox),
+      ..Default::default()
+    };
+
+    let output = mcp_nix::run_package(&package_ref, program, &options).unwrap();
+
+    assert!(
+      output.contains("Hello, world!"),
+      "unexpected output: {output}"
+    );
+  });
+}
+
+#[test]
 fn run_package_builds_package_and_runs_program() {
   if !bwrap_usable() {
     return;

@@ -68,6 +68,12 @@ pub enum NixError {
     /// The standard error output of the command.
     stderr: String,
   },
+  /// The program or command is not in the `MCP_NIX_COMMANDS` allow list.
+  #[error("command {command} is not allowed by MCP_NIX_COMMANDS")]
+  CommandNotAllowed {
+    /// The program or command being run.
+    command: String,
+  },
 }
 
 /// Build the given nix package and return its nix store path.
@@ -98,6 +104,12 @@ pub fn run_package(
   program: &str,
   options: &sandbox::RunOptions,
 ) -> Result<String, NixError> {
+  if !sandbox::command_allowed(program, &options.allowed_commands) {
+    return Err(NixError::CommandNotAllowed {
+      command: program.to_string(),
+    });
+  }
+
   let store_path = build_package(package)?;
   sandbox::run_program(&store_path, program, options).map_err(NixError::Run)
 }
@@ -242,6 +254,12 @@ pub fn develop(
   command: &str,
   options: &sandbox::RunOptions,
 ) -> Result<String, NixError> {
+  if !sandbox::command_allowed(command, &options.allowed_commands) {
+    return Err(NixError::CommandNotAllowed {
+      command: command.to_string(),
+    });
+  }
+
   let nix = sandbox::resolve_on_path("nix")
     .map_err(|source| NixError::Spawn { source })?;
   let bash = sandbox::resolve_on_path("bash")

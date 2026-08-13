@@ -151,6 +151,7 @@ impl NixServer {
         env,
         cwd,
         sandbox: sandbox::sandbox_args(),
+        allowed_commands: sandbox::allowed_commands(),
       };
       run_package(&package, &program, &options)
     })
@@ -191,6 +192,7 @@ impl NixServer {
         env,
         cwd,
         sandbox: sandbox::sandbox_args(),
+        allowed_commands: sandbox::allowed_commands(),
       };
       develop(&flake, &command, &options)
     })

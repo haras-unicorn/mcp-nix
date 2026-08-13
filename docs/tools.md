@@ -54,7 +54,9 @@ output as its content.
 ### Sandboxing
 
 See [Sandboxing](./introduction.md) for how the program is wrapped in a
-bubblewrap sandbox and how its environment is set.
+bubblewrap sandbox and how its environment is set. When the `MCP_NIX_COMMANDS`
+environment variable is set, the `program` must be listed in it for the tool to
+run.
 
 ### Examples
 
@@ -95,7 +97,9 @@ the sandbox environment; the command runs inside the [bubblewrap] sandbox with
 that environment. The dev shell `shellHook` (and any shell functions) run inside
 the sandbox right before the command. Hooks that bootstrap an environment with
 network access (for example `uv`) require a sandbox configuration without
-`--unshare-net`, see [Sandboxing](./introduction.md).
+`--unshare-net`, see [Sandboxing](./introduction.md). When the
+`MCP_NIX_COMMANDS` environment variable is set, the `command` must be listed in
+it for the tool to run.
 
 ### Examples
 
