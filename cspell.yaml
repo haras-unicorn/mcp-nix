@@ -28,3 +28,11 @@ ignoreWords:
   - SHELLOPTS
   - nixos
   - clippy
+  - cachix
+  - substituters
+  - aarch64
+  - x86_64
+  - nixConfig
+  - tarballs
+  - home-manager
+  - pkgs
