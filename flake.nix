@@ -47,7 +47,7 @@
               cargoToml = builtins.fromTOML (builtins.readFile "${self}/src/mcp-nix/Cargo.toml");
             in
             {
-              src = pkgs.cleanSourceWith {
+              src = pkgs.lib.cleanSourceWith {
                 src = self;
                 filter =
                   path: type:
