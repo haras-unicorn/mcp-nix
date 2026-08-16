@@ -88,7 +88,7 @@
                 }:
                 symlinkJoin {
                   name = "mcp-nix";
-                  paths = [ unwrapped ];
+                  paths = [ mcp-nix-unwrapped ];
                   buildInputs = [ makeWrapper ];
                   meta.mainProgram = "mcp-nix";
                   postBuild = ''
