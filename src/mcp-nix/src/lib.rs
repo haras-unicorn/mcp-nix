@@ -33,15 +33,9 @@ pub use sandbox::{RunOptions, run_program};
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct BuildParams {
   /// A nix package reference, for example `nixpkgs#hello`.
-  #[schemars(
-    description = "A nix package reference, for example `nixpkgs#hello`."
-  )]
   pub package: String,
   /// Pass `--show-trace` to `nix build` so that evaluation errors include the
   /// full stack trace.
-  #[schemars(
-    description = "Pass `--show-trace` to `nix build` so that evaluation errors include the full stack trace."
-  )]
   #[serde(default)]
   pub show_trace: bool,
 }
@@ -50,36 +44,20 @@ pub struct BuildParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RunParams {
   /// A nix package reference, for example `nixpkgs#hello`.
-  #[schemars(
-    description = "A nix package reference, for example `nixpkgs#hello`."
-  )]
   pub package: String,
   /// Pass `--show-trace` to the `nix build` step so that evaluation errors
   /// include the full stack trace.
-  #[schemars(
-    description = "Pass `--show-trace` to the `nix build` step so that evaluation errors include the full stack trace."
-  )]
   #[serde(default)]
   pub show_trace: bool,
   /// The program to run from the built package, for example `hello`.
-  #[schemars(
-    description = "The program to run from the built package, for example `hello`."
-  )]
   pub program: String,
   /// Arguments passed to the program.
-  #[schemars(description = "Arguments passed to the program.")]
   #[serde(default)]
   pub args: Vec<String>,
   /// Additional environment variables set for the program.
-  #[schemars(
-    description = "Additional environment variables set for the program. The program runs in a sandbox with a clean environment, so these supplement the minimal base environment."
-  )]
   #[serde(default)]
   pub env: HashMap<String, String>,
   /// The working directory for the program.
-  #[schemars(
-    description = "The working directory for the program. Inside the sandbox it must be visible, for example `/tmp`."
-  )]
   #[serde(default)]
   pub cwd: Option<String>,
 }
@@ -88,36 +66,20 @@ pub struct RunParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct DevelopParams {
   /// A flake reference, for example `path:./.` or `github:foo/bar#some-devshell`.
-  #[schemars(
-    description = "A flake reference, for example `path:./.` or `github:foo/bar#some-devshell`. The dev shell defaults to `devShells.<system>.default`."
-  )]
   pub flake: String,
   /// Pass `--show-trace` to `nix print-dev-env` so that evaluation errors
   /// include the full stack trace.
-  #[schemars(
-    description = "Pass `--show-trace` to `nix print-dev-env` so that evaluation errors include the full stack trace."
-  )]
   #[serde(default)]
   pub show_trace: bool,
   /// The command to run inside the dev shell, for example `cargo`.
-  #[schemars(
-    description = "The command to run inside the dev shell, for example `cargo`."
-  )]
   pub command: String,
   /// Arguments passed to the command.
-  #[schemars(description = "Arguments passed to the command.")]
   #[serde(default)]
   pub args: Vec<String>,
   /// Additional environment variables set for the command.
-  #[schemars(
-    description = "Additional environment variables set for the command. The command runs in a sandbox with the dev shell environment, so these supplement it."
-  )]
   #[serde(default)]
   pub env: HashMap<String, String>,
   /// The working directory for the command.
-  #[schemars(
-    description = "The working directory for the command. Inside the sandbox it must be visible, for example `/tmp`."
-  )]
   #[serde(default)]
   pub cwd: Option<String>,
 }
@@ -126,27 +88,15 @@ pub struct DevelopParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CheckParams {
   /// A flake reference, for example `path:./.` or `github:foo/bar`.
-  #[schemars(
-    description = "A flake reference, for example `path:./.` or `github:foo/bar`."
-  )]
   pub flake: String,
   /// Check the flake's outputs for all systems, not just the current one.
-  #[schemars(
-    description = "Check the flake's outputs for all systems, not just the current one (passes `--all-systems`)."
-  )]
   #[serde(default)]
   pub all_systems: bool,
   /// Only check that the flake evaluates, without building any derivations.
-  #[schemars(
-    description = "Only check that the flake evaluates, without building any derivations (passes `--no-build`)."
-  )]
   #[serde(default)]
   pub no_build: bool,
   /// Pass `--show-trace` to `nix flake check` so that evaluation errors include
   /// the full stack trace.
-  #[schemars(
-    description = "Pass `--show-trace` to `nix flake check` so that evaluation errors include the full stack trace."
-  )]
   #[serde(default)]
   pub show_trace: bool,
 }
@@ -158,7 +108,7 @@ pub struct NixServer;
 #[tool_router(server_handler)]
 impl NixServer {
   /// Build a nix package and return its nix store path.
-  #[tool(description = "Build a nix package and return its nix store path.")]
+  #[tool]
   async fn nix_build(
     &self,
     Parameters(params): Parameters<BuildParams>,
@@ -187,9 +137,7 @@ impl NixServer {
 
   /// Build a nix package and run one of its programs, wrapped in a bubblewrap
   /// sandbox.
-  #[tool(
-    description = "Build a nix package and run one of its programs, wrapped in a bubblewrap sandbox."
-  )]
+  #[tool]
   async fn nix_run(
     &self,
     Parameters(params): Parameters<RunParams>,
@@ -230,9 +178,7 @@ impl NixServer {
 
   /// Enter a nix dev shell and run one of its commands, wrapped in a bubblewrap
   /// sandbox.
-  #[tool(
-    description = "Enter a nix dev shell and run one of its commands, wrapped in a bubblewrap sandbox."
-  )]
+  #[tool]
   async fn nix_develop(
     &self,
     Parameters(params): Parameters<DevelopParams>,
@@ -272,7 +218,7 @@ impl NixServer {
   }
 
   /// Check a nix flake for errors with `nix flake check`.
-  #[tool(description = "Check a nix flake for errors with nix flake check.")]
+  #[tool]
   async fn nix_check(
     &self,
     Parameters(params): Parameters<CheckParams>,
