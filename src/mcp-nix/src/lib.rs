@@ -25,7 +25,8 @@ use rmcp::tool;
 use rmcp::tool_router;
 
 pub use nix::{
-  CheckOptions, NixError, build_package, check_flake, develop, run_package,
+  CheckOptions, LogOptions, NixError, build_package, check_flake, develop,
+  fetch_log, run_package,
 };
 pub use sandbox::{RunOptions, run_program};
 
@@ -99,6 +100,35 @@ pub struct CheckParams {
   /// the full stack trace.
   #[serde(default)]
   pub show_trace: bool,
+}
+
+/// Parameters for the `nix_log` tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LogParams {
+  /// A nix package reference or store path, for example `nixpkgs#hello` or the
+  /// failing `/nix/store/...-.drv` printed by a build error.
+  pub package: String,
+  /// The 0-based line the page starts at; counted from the end of the log when
+  /// `from_end` is set.
+  #[serde(default)]
+  pub offset: usize,
+  /// The number of lines per page.
+  #[serde(default = "default_log_limit")]
+  pub limit: usize,
+  /// Return a window at the end of the log instead of the beginning: the page
+  /// is `total - offset - limit..total - offset` instead of
+  /// `offset..offset + limit`. An `offset` of `0` returns the last `limit`
+  /// lines, and increasing `offset` walks backwards through the log.
+  #[serde(default)]
+  pub from_end: bool,
+}
+
+/// The default number of lines per `nix_log` page.
+const DEFAULT_LOG_LIMIT: usize = 100;
+
+/// Return the default number of lines per `nix_log` page for serde.
+fn default_log_limit() -> usize {
+  DEFAULT_LOG_LIMIT
 }
 
 /// MCP server that provides nix tooling.
@@ -237,6 +267,40 @@ impl NixServer {
     };
 
     match tokio::task::spawn_blocking(move || check_flake(&flake, &options))
+      .await
+    {
+      Ok(Ok(output)) => {
+        Ok(CallToolResult::success(vec![ContentBlock::text(output)]))
+      }
+      Ok(Err(error)) => Ok(CallToolResult::error(vec![ContentBlock::text(
+        error.to_string(),
+      )])),
+      Err(join_error) => {
+        Err(ErrorData::internal_error(join_error.to_string(), None))
+      }
+    }
+  }
+
+  /// Fetch and paginate the build log of a nix package or store path.
+  #[tool]
+  async fn nix_log(
+    &self,
+    Parameters(params): Parameters<LogParams>,
+  ) -> Result<CallToolResult, ErrorData> {
+    let LogParams {
+      package,
+      offset,
+      limit,
+      from_end,
+    } = params;
+
+    let options = LogOptions {
+      offset,
+      limit,
+      from_end,
+    };
+
+    match tokio::task::spawn_blocking(move || fetch_log(&package, &options))
       .await
     {
       Ok(Ok(output)) => {
