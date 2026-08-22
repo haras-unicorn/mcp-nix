@@ -1,12 +1,15 @@
 mod common;
 
-use common::{ECHO_FLAKE, TempFlake, build_flake_package};
+use common::{ECHO_FLAKE, TempFlake, build_flake_with_log};
 use mcp_nix::{LogOptions, fetch_log};
 
 #[test]
 fn fetch_log_returns_the_first_page_of_the_build_log() {
   let flake = TempFlake::new(ECHO_FLAKE);
-  let store_path = build_flake_package(&flake);
+  let Some(store_path) = build_flake_with_log(&flake) else {
+    eprintln!("skipping: build log not available in this environment");
+    return;
+  };
 
   let log = fetch_log(
     &store_path,
@@ -35,7 +38,10 @@ fn fetch_log_returns_the_first_page_of_the_build_log() {
 #[test]
 fn fetch_log_returns_a_page_from_an_offset() {
   let flake = TempFlake::new(ECHO_FLAKE);
-  let store_path = build_flake_package(&flake);
+  let Some(store_path) = build_flake_with_log(&flake) else {
+    eprintln!("skipping: build log not available in this environment");
+    return;
+  };
 
   let log = fetch_log(
     &store_path,
@@ -60,7 +66,10 @@ fn fetch_log_returns_a_page_from_an_offset() {
 #[test]
 fn fetch_log_from_end_returns_the_end_of_the_log() {
   let flake = TempFlake::new(ECHO_FLAKE);
-  let store_path = build_flake_package(&flake);
+  let Some(store_path) = build_flake_with_log(&flake) else {
+    eprintln!("skipping: build log not available in this environment");
+    return;
+  };
 
   let log = fetch_log(
     &store_path,
@@ -85,7 +94,10 @@ fn fetch_log_from_end_returns_the_end_of_the_log() {
 #[test]
 fn fetch_log_from_end_with_offset_walks_backwards() {
   let flake = TempFlake::new(ECHO_FLAKE);
-  let store_path = build_flake_package(&flake);
+  let Some(store_path) = build_flake_with_log(&flake) else {
+    eprintln!("skipping: build log not available in this environment");
+    return;
+  };
 
   let log = fetch_log(
     &store_path,
