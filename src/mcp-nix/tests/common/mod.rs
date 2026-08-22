@@ -63,6 +63,46 @@ impl Drop for TempFlake {
   }
 }
 
+/// A flake whose package build echoes 25 lines to stdout so they end up in the
+/// build log.
+pub const ECHO_FLAKE: &str = r#"
+{
+  outputs = { self }: {
+    packages.x86_64-linux.default = derivation {
+      name = "mcp-nix-log-test";
+      system = "x86_64-linux";
+      builder = "/bin/sh";
+      args = [ "-c"
+        "i=1; while [ $i -le 25 ]; do echo \"log-line-$i\"; i=$((i + 1)); done; echo done > \"$out\""
+      ];
+    };
+  };
+}
+"#;
+
+/// Build the default package of the given flake and return its store path.
+pub fn build_flake_package(flake: &TempFlake) -> String {
+  let output = process::Command::new("nix")
+    .args([
+      "build",
+      "--no-link",
+      "--print-out-paths",
+      &format!("{}#default", flake.dir.display()),
+    ])
+    .output()
+    .expect("failed to spawn nix build");
+  assert!(
+    output.status.success(),
+    "nix build failed: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  String::from_utf8_lossy(&output.stdout)
+    .split_whitespace()
+    .next()
+    .expect("nix build produced no output")
+    .to_string()
+}
+
 /// Return the nix store directory containing the given program, or `None`
 /// when the program does not resolve into the store.
 pub fn store_bin_dir(program: &str) -> Option<String> {

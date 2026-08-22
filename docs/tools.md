@@ -145,4 +145,41 @@ On failure the tool returns a text result with `isError` set and the
 | `path:./.` | `no_build`    | success, only evaluation checked |
 | `path:./.` | `all_systems` | success, all systems evaluated   |
 
+## `nix_log`
+
+Fetch the build log of a nix package or store path with `nix log`, truncated to
+a page. Build logs (for example from nixos tests) can be extremely long, so the
+tool returns a window of lines plus a footer describing the window and how to
+fetch the next page.
+
+### Parameters
+
+- `package` (string, required) - a nix package reference or store path, for
+  example `nixpkgs#hello` or the failing `/nix/store/...-.drv` printed by a
+  build error.
+- `offset` (integer, optional) - the 0-based line the page starts at, defaults
+  to `0`. When `from_end` is set, the offset is counted from the end of the log.
+- `limit` (integer, optional) - the number of lines per page, defaults to `100`.
+- `from_end` (boolean, optional) - return a window at the end of the log instead
+  of the beginning, for example to see the error at the end of a nixos test log.
+  Instead of `offset..offset + limit` the page is
+  `total - offset - limit..total - offset`, so `from_end` with an `offset` of
+  `0` returns the last `limit` lines and increasing `offset` walks backwards
+  through the log.
+
+### Result
+
+The page contains the requested window of log lines followed by a footer in the
+form `[nix_log] lines 100..199 of 24781 · next offset: 200`. A page that covers
+the end of the log ends with `· end of log` instead. When no build log is
+available the tool reports that instead of failing.
+
+### Examples
+
+| Package         | Options                   | Result            |
+| --------------- | ------------------------- | ----------------- |
+| `nixpkgs#hello` | -                         | first 100 lines   |
+| `.drv`          | `from_end`                | last 100 lines    |
+| `.drv`          | `from_end`, `offset: 200` | ends 200 from end |
+
 [bubblewrap]: https://github.com/containers/bubblewrap

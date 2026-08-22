@@ -80,6 +80,12 @@ pub enum NixError {
     /// The standard error output of the `nix` command.
     stderr: String,
   },
+  /// `nix log` exited with a non-zero status.
+  #[error("nix log failed:\n{stderr}")]
+  LogFailed {
+    /// The standard error output of the `nix` command.
+    stderr: String,
+  },
 }
 
 /// Build the given nix package and return its nix store path.
@@ -384,6 +390,135 @@ fn check_args(flake: &str, options: &CheckOptions) -> Vec<String> {
   args
 }
 
+/// Options for `nix log`.
+#[derive(Debug, Default)]
+pub struct LogOptions {
+  /// The 0-based line the page starts at; counted from the end of the log when
+  /// `from_end` is set.
+  pub offset: usize,
+  /// The number of lines per page.
+  pub limit: usize,
+  /// Return a window at the end of the log instead of the beginning: the page
+  /// is `total - offset - limit..total - offset` instead of
+  /// `offset..offset + limit`.
+  pub from_end: bool,
+}
+
+/// Fetch the build log of the given package or store path and return one page
+/// of it.
+///
+/// Build logs can be extremely long (for example nixos tests), so the log is
+/// paginated server-side: the page is a window of lines ending with a footer
+/// describing the window and the offset of the next page.
+pub fn fetch_log(
+  package: &str,
+  options: &LogOptions,
+) -> Result<String, NixError> {
+  let output = Command::new("nix")
+    .args(["log", package])
+    .output()
+    .map_err(|source| NixError::Spawn { source })?;
+
+  if !output.status.success() {
+    return Err(NixError::LogFailed {
+      stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    });
+  }
+
+  let log = String::from_utf8_lossy(&output.stdout);
+  if log.trim().is_empty() {
+    return Ok(format!("no build log available for {package}"));
+  }
+
+  let lines = log.lines().map(str::to_string).collect::<Vec<_>>();
+  let page = paginate(&lines, options.offset, options.limit, options.from_end);
+
+  let mut result = page.lines.join("\n");
+  if !result.is_empty() {
+    result.push('\n');
+  }
+  result.push_str(&describe_page(
+    page.start,
+    page.end,
+    page.total,
+    page.next_offset,
+  ));
+  Ok(result)
+}
+
+/// A window into a build log.
+struct LogPage {
+  /// The lines of the window.
+  lines: Vec<String>,
+  /// The index of the first line of the window.
+  start: usize,
+  /// The index one past the last line of the window.
+  end: usize,
+  /// The total number of lines in the log.
+  total: usize,
+  /// The `offset` to request for the next page, or `None` when the page
+  /// reaches the end of the log.
+  next_offset: Option<usize>,
+}
+
+/// Compute the window of a build log for the given pagination options.
+///
+/// Without `from_end` the window is `offset..offset + limit`, with `offset`
+/// clamped to the end of the log, producing an empty page when it is past the
+/// end. With `from_end` set the window is `total - offset - limit..total -
+/// offset`, starting from the end of the log: an `offset` of `0` returns the
+/// last `limit` lines and increasing `offset` walks backwards through the log.
+fn paginate(
+  lines: &[String],
+  offset: usize,
+  limit: usize,
+  from_end: bool,
+) -> LogPage {
+  let total = lines.len();
+  let (start, end, next_offset) = if from_end {
+    let end = total.saturating_sub(offset);
+    let start = end.saturating_sub(limit);
+    let next_offset = if start == 0 {
+      None
+    } else {
+      Some(offset.saturating_add(limit))
+    };
+    (start, end, next_offset)
+  } else {
+    let end = offset.saturating_add(limit).min(total);
+    let start = offset.min(total);
+    let next_offset = if end >= total { None } else { Some(end) };
+    (start, end, next_offset)
+  };
+
+  LogPage {
+    lines: lines[start..end].to_vec(),
+    start,
+    end,
+    total,
+    next_offset,
+  }
+}
+
+/// Describe a log page: its window of lines and how to navigate to the next
+/// page. The footer is appended to the raw page lines.
+fn describe_page(
+  start: usize,
+  end: usize,
+  total: usize,
+  next_offset: Option<usize>,
+) -> String {
+  if start == end {
+    return format!("[nix_log] end of log ({total} total lines)");
+  }
+  let window = format!("lines {start}..{} of {total}", end.saturating_sub(1));
+  let navigation = match next_offset {
+    Some(offset) => format!("next offset: {offset}"),
+    None => "end of log".to_string(),
+  };
+  format!("[nix_log] {window} · {navigation}")
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -497,6 +632,140 @@ mod tests {
       .into_iter()
       .map(String::from)
       .collect::<Vec<_>>()
+    );
+  }
+
+  #[test]
+  fn paginate_returns_first_page_by_default() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 0, 100, false);
+
+    assert_eq!(page.start, 0);
+    assert_eq!(page.end, 100);
+    assert_eq!(page.total, 250);
+    assert_eq!(page.next_offset, Some(100));
+    assert_eq!(page.lines.len(), 100);
+    assert_eq!(page.lines.first().map(String::as_str), Some("0"));
+    assert_eq!(page.lines.last().map(String::as_str), Some("99"));
+  }
+
+  #[test]
+  fn paginate_returns_middle_page() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 100, 100, false);
+
+    assert_eq!(page.start, 100);
+    assert_eq!(page.end, 200);
+    assert_eq!(page.next_offset, Some(200));
+    assert_eq!(page.lines.first().map(String::as_str), Some("100"));
+    assert_eq!(page.lines.last().map(String::as_str), Some("199"));
+  }
+
+  #[test]
+  fn paginate_clamps_at_end_of_log() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 200, 100, false);
+
+    assert_eq!(page.start, 200);
+    assert_eq!(page.end, 250);
+    assert_eq!(page.next_offset, None);
+    assert_eq!(page.lines.len(), 50);
+    assert_eq!(page.lines.first().map(String::as_str), Some("200"));
+    assert_eq!(page.lines.last().map(String::as_str), Some("249"));
+  }
+
+  #[test]
+  fn paginate_offset_past_end_is_empty() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 500, 100, false);
+
+    assert_eq!(page.start, 250);
+    assert_eq!(page.end, 250);
+    assert_eq!(page.next_offset, None);
+    assert!(page.lines.is_empty());
+  }
+
+  #[test]
+  fn paginate_from_end_returns_last_lines() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 0, 10, true);
+
+    assert_eq!(page.start, 240);
+    assert_eq!(page.end, 250);
+    assert_eq!(page.next_offset, Some(10));
+    assert_eq!(page.lines.len(), 10);
+    assert_eq!(page.lines.first().map(String::as_str), Some("240"));
+    assert_eq!(page.lines.last().map(String::as_str), Some("249"));
+  }
+
+  #[test]
+  fn paginate_from_end_with_offset_walks_backwards() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 100, 10, true);
+
+    assert_eq!(page.start, 140);
+    assert_eq!(page.end, 150);
+    assert_eq!(page.next_offset, Some(110));
+    assert_eq!(page.lines.first().map(String::as_str), Some("140"));
+    assert_eq!(page.lines.last().map(String::as_str), Some("149"));
+  }
+
+  #[test]
+  fn paginate_from_end_offset_past_log_is_empty() {
+    let lines = (0..250).map(|i| i.to_string()).collect::<Vec<_>>();
+    let page = paginate(&lines, 500, 100, true);
+
+    assert_eq!(page.start, 0);
+    assert_eq!(page.end, 0);
+    assert_eq!(page.next_offset, None);
+    assert!(page.lines.is_empty());
+  }
+
+  #[test]
+  fn describe_page_middle_page_points_to_next_offset() {
+    assert_eq!(
+      describe_page(100, 200, 250, Some(200)),
+      "[nix_log] lines 100..199 of 250 · next offset: 200"
+    );
+  }
+
+  #[test]
+  fn describe_page_last_page_marks_end_of_log() {
+    assert_eq!(
+      describe_page(200, 250, 250, None),
+      "[nix_log] lines 200..249 of 250 · end of log"
+    );
+  }
+
+  #[test]
+  fn describe_page_from_end_page_points_to_next_offset() {
+    assert_eq!(
+      describe_page(140, 150, 250, Some(110)),
+      "[nix_log] lines 140..149 of 250 · next offset: 110"
+    );
+  }
+
+  #[test]
+  fn describe_page_last_page_from_end_points_backwards() {
+    assert_eq!(
+      describe_page(240, 250, 250, Some(10)),
+      "[nix_log] lines 240..249 of 250 · next offset: 10"
+    );
+  }
+
+  #[test]
+  fn describe_page_from_end_reached_start_marks_end() {
+    assert_eq!(
+      describe_page(0, 10, 250, None),
+      "[nix_log] lines 0..9 of 250 · end of log"
+    );
+  }
+
+  #[test]
+  fn describe_page_offset_past_end_marks_end() {
+    assert_eq!(
+      describe_page(250, 250, 250, None),
+      "[nix_log] end of log (250 total lines)"
     );
   }
 }
