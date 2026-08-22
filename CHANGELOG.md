@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/haras-unicorn/mcp-nix/compare/v0.1.3...v0.1.4) - 2026-08-22
+
+### Added
+
+- nix log tool ([#18](https://github.com/haras-unicorn/mcp-nix/pull/18))
+
+### Fixed
+
+- *(lib)* remove redundant tool and schemars descriptions and let them use doc comments ([#16](https://github.com/haras-unicorn/mcp-nix/pull/16))
+
+### Other
+
+- add changelog to cspell exceptions ([#19](https://github.com/haras-unicorn/mcp-nix/pull/19))
+
 ## [0.1.3](https://github.com/haras-unicorn/mcp-nix/compare/v0.1.2...v0.1.3) - 2026-08-13
 
 ### Fixed
