@@ -103,6 +103,27 @@ pub fn build_flake_package(flake: &TempFlake) -> String {
     .to_string()
 }
 
+/// Whether the build log of a freshly built store path can be retrieved with
+/// `nix log`, or `None` when it is not available.
+///
+/// A build failure is a hard error; only the log lookup is treated as an
+/// environment precondition, so tests can skip when the build log is not
+/// retained (for example on CI).
+pub fn build_flake_with_log(flake: &TempFlake) -> Option<String> {
+  let store_path = build_flake_package(flake);
+  let output = process::Command::new("nix")
+    .args(["log", &store_path])
+    .output()
+    .expect("failed to spawn nix log");
+  if !output.status.success() {
+    return None;
+  }
+  if String::from_utf8_lossy(&output.stdout).trim().is_empty() {
+    return None;
+  }
+  Some(store_path)
+}
+
 /// Return the nix store directory containing the given program, or `None`
 /// when the program does not resolve into the store.
 pub fn store_bin_dir(program: &str) -> Option<String> {
