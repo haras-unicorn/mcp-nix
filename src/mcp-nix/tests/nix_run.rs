@@ -127,6 +127,35 @@ fn run_program_under_bwrap_sets_custom_env() {
 }
 
 #[test]
+fn run_program_under_bwrap_keeps_setenv_from_sandbox_args() {
+  if !bwrap_usable() {
+    return;
+  }
+  let Some(store_dir) = store_bin_dir("env") else {
+    eprintln!("skipping bwrap setenv test: env is not in the nix store");
+    return;
+  };
+  let mut sandbox: Vec<String> =
+    TEST_BWRAP_ARGS.iter().map(|arg| arg.to_string()).collect();
+  sandbox.extend([
+    "--setenv".to_string(),
+    "MCP_NIX_SANDBOX_VAR".to_string(),
+    "from-sandbox-args".to_string(),
+  ]);
+  let options = RunOptions {
+    sandbox: Some(sandbox),
+    ..Default::default()
+  };
+
+  let output = mcp_nix::run_program(&store_dir, "env", &options).unwrap();
+
+  assert!(
+    output.contains("MCP_NIX_SANDBOX_VAR=from-sandbox-args"),
+    "--setenv from the sandbox arguments was cleared: {output}"
+  );
+}
+
+#[test]
 fn run_program_under_bwrap_sets_working_directory() {
   if !bwrap_usable() {
     return;

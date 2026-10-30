@@ -213,10 +213,12 @@ fn resolve_bwrap() -> Result<String, SandboxError> {
 /// configured sandbox.
 ///
 /// When [`RunOptions::sandbox`] is `Some`, `bwrap` is resolved to an absolute
-/// path and prepended together with the sandbox arguments, `--clearenv`,
+/// path and prepended together with `--clearenv`, the sandbox arguments,
 /// `--setenv` pairs for [`merged_env`], an optional `--chdir`, the command and
-/// its arguments. When it is `None`, the command and its arguments are returned
-/// directly.
+/// its arguments. `--clearenv` comes first because bubblewrap applies
+/// environment arguments in order, so a `--setenv` in `MCP_NIX_SANDBOX` would
+/// otherwise be wiped by it. When it is `None`, the command and its arguments
+/// are returned directly.
 pub fn sandboxed_argv(
   command: &str,
   args: &[String],
@@ -228,8 +230,8 @@ pub fn sandboxed_argv(
       let bwrap = resolve_bwrap()?;
       let mut argv = Vec::new();
       argv.push(bwrap);
-      argv.extend(bwrap_args.iter().cloned());
       argv.push("--clearenv".to_string());
+      argv.extend(bwrap_args.iter().cloned());
       for (key, value) in merged_env(extra_env, options, true) {
         argv.push("--setenv".to_string());
         argv.push(key);
@@ -371,6 +373,23 @@ mod tests {
         "/nix/store".to_string(),
       ])
     );
+  }
+
+  #[test]
+  fn clearenv_precedes_user_sandbox_args() {
+    let options = RunOptions {
+      sandbox: Some(split_args("--setenv FOO bar")),
+      ..RunOptions::default()
+    };
+    // bwrap may not be on PATH in every environment running unit tests.
+    let Ok(argv) = sandboxed_argv("true", &[], &options, &[]) else {
+      return;
+    };
+    let position = |flag: &str| argv.iter().position(|arg| arg == flag);
+    let clearenv = position("--clearenv").unwrap();
+    let user_setenv = position("--setenv").unwrap();
+    assert!(clearenv < user_setenv);
+    assert_eq!(argv[user_setenv + 1], "FOO");
   }
 
   #[test]
