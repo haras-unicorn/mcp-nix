@@ -191,7 +191,8 @@ applies.
 
 Inside the sandbox the environment is cleared with bubblewrap (`--clearenv`) and
 set to a minimal set of variables defined in
-[Sandbox configuration](#sandbox-configuration).
+[Sandbox configuration](#sandbox-configuration). `--clearenv` is passed before
+the `MCP_NIX_SANDBOX` arguments, so a `--setenv` in `MCP_NIX_SANDBOX` is kept.
 
 For `nix_develop` the dev shell environment captured with `nix print-dev-env` is
 merged into the sandbox environment (its `PATH` is prepended), and its shell
