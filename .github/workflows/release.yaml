@@ -1,33 +1,47 @@
-name: release
-on:
-  push:
-    tags:
-      - "v[0-9]+.*"
-jobs:
-  release:
-    permissions:
-      contents: write
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64-linux
-            runner: ubuntu-latest
-          - arch: aarch64-linux
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - uses: cachix/cachix-action@v15
-        with:
-          name: haras
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - run: |
-          nix build --show-trace .#unwrapped
-          mkdir -p release
-          cp -L result/bin/mcp-nix release/mcp-nix-${{ matrix.arch }}
-          tar -czf mcp-nix-${{ matrix.arch }}.tar.gz -C release mcp-nix-${{ matrix.arch }}
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$GITHUB_REF_NAME" mcp-nix-${{ matrix.arch }}.tar.gz --clobber
+{
+  "jobs":
+    {
+      "build":
+        {
+          "runs-on": "${{ matrix.os }}",
+          "steps":
+            [
+              { "uses": "actions/checkout@v4", "with": { "fetch-depth": 0 } },
+              {
+                "uses": "cachix/install-nix-action@v31",
+                "with":
+                  {
+                    "extra_nix_config":
+                      "experimental-features = nix-command flakes
+                      auto-allocate-uids cgroups\nauto-allocate-uids = true\n",
+                  },
+              },
+              {
+                "uses": "cachix/cachix-action@v15",
+                "with":
+                  {
+                    "authToken": "${{ secrets.CACHIX_AUTH_TOKEN }}",
+                    "extraPullNames": "haras-releases",
+                    "name": "haras",
+                  },
+              },
+              { "run": "nix build --show-trace .#mcp-nix-unwrapped" },
+              {
+                "env": { "GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}" },
+                "run":
+                  "arch=\"$(uname -m)-linux\"\nmkdir -p release\ncp -L
+                  result/bin/mcp-nix \"release/mcp-nix-$arch\"\ncp -L
+                  result/bin/mcp-nix-hook \"release/mcp-nix-hook-$arch\"\ntar
+                  -czf \"mcp-nix-$arch.tar.gz\" -C release \"mcp-nix-$arch\"
+                  \"mcp-nix-hook-$arch\"\ngh release upload \"$GITHUB_REF_NAME\"
+                  \"mcp-nix-$arch.tar.gz\" --clobber\n",
+              },
+            ],
+          "strategy":
+            { "matrix": { "os": ["ubuntu-latest", "ubuntu-24.04-arm"] } },
+        },
+    },
+  "name": "release",
+  "on": { "push": { "tags": ["v[0-9]+.*"] } },
+  "permissions": { "contents": "write" },
+}

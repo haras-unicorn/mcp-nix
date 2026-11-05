@@ -1,9 +1,0 @@
-{
-  "$schema": "https://raw.githubusercontent.com/DavidAnson/markdownlint/main/schema/markdownlint-config-schema.json",
-  "line-length": {
-    "code_blocks": false
-  },
-  "no-duplicate-heading": {
-    "siblings_only": true
-  }
-}
