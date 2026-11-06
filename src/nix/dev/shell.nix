@@ -155,6 +155,7 @@
             "subtest"
             "pgrep"
             "odman"
+            "getuid"
           ];
         };
 

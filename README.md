@@ -418,6 +418,10 @@ server stops, together with every container. The programs then run through
   deleted when the server stops, so a reaper container has nothing to add.
 - The shim that runs bubblewrap enters the world first, so if the world is gone
   the programs fail and do not run with the host network.
+- The user is root inside the world, but the programs are not: the shim gives
+  their sandbox the user and group ids of the server (`--uid` and `--gid`), so
+  programs like `nix` do not take it for a root user. It is the same user
+  outside the world either way.
 - `nix` is not in the world. It keeps its own sandbox and the nix daemon.
 
 The wrapper sets `MCP_NIX__BWRAP_COMMAND` and appends to
