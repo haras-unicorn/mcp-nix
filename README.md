@@ -299,6 +299,12 @@ small as it can be and still work:
   sandbox makes writable and opens an empty store of its own there. Without a
   daemon, put `--setenv NIX_REMOTE auto` in `nix_bwrap_args_extra`, and then
   `nix` works on a store of its own, which the sandbox has to bind.
+- The settings and the flake registry of the system are visible. On NixOS
+  `/etc/nix/nix.conf` and `registry.json` are links into `/etc/static/nix`, so
+  that is bound too. The global flake registry is not available, because it is
+  downloaded: the tools give `nix` a blank `flake-registry` in this sandbox. A
+  short reference like `nixpkgs#hello` therefore has to be in the registry of
+  the system (`nix.registry` on NixOS) or be written out in full.
 - The working directory of the command is added read-only by the server. A flake
   somewhere else is not visible unless `nix_bwrap_args` binds it, and a lock
   file that needs an update cannot be written.

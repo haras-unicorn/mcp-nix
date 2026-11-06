@@ -292,6 +292,10 @@
             failed, text = call("nix_build", {"package": probes["network-probe"]})
             assert not failed and text == probes["network-probe"], text
 
+            failed, text = call("nix_build", {"package": "probe#default"})
+            assert not failed, text
+            print("a flake of the system registry builds", flush=True)
+
             failed, text = call("nix_build", {"package": ".#default"})
             assert failed and "mcp-nix-hook" in text, (failed, text)
             print("the hook refused the fixed-output derivation", flush=True)
@@ -336,6 +340,21 @@
               };
             }
           '';
+
+          # A flake that only the system registry knows about, like the
+          # nixpkgs of a NixOS configuration.
+          registryFlake = pkgs.writeTextDir "flake.nix" ''
+            {
+              outputs = { self }: {
+                packages.${system}.default = derivation {
+                  name = "mcp-nix-podman-registry";
+                  system = "${system}";
+                  builder = "/bin/sh";
+                  args = [ "-c" "echo hello > $out" ];
+                };
+              };
+            }
+          '';
         in
         {
           virtualisation = {
@@ -349,6 +368,11 @@
           };
 
           nix.settings.trusted-users = [ "agent" ];
+
+          nix.registry.probe.to = {
+            type = "path";
+            path = "${registryFlake}";
+          };
 
           environment.systemPackages = [
             server
