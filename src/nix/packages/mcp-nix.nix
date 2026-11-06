@@ -216,7 +216,10 @@
         # The server runs this in place of bubblewrap (bwrap_command). The
         # network is shared here and not in the arguments, so a server that
         # ignores the setting leaves the programs with no network instead of
-        # the network of the machine.
+        # the network of the machine. The user is root in the world, so the
+        # programs are given the user and group ids of the server instead, or
+        # programs like nix would take the sandbox for a root user. It is the
+        # same user outside the world either way.
         bwrapInContainerWorld = final.writeShellApplication {
           name = "mcp-nix-bwrap-in-container-world";
           runtimeInputs = [
@@ -224,11 +227,13 @@
             final.util-linux
           ];
           text = ''
+            uid="$(id -u)"
+            gid="$(id -g)"
             args=()
             for arg in "$@"; do
               args+=("$arg")
               if [ "$arg" = "--unshare-all" ]; then
-                args+=("--share-net")
+                args+=(--share-net --uid "$uid" --gid "$gid")
               fi
             done
             exec nsenter --target "$MCP_NIX_PODMAN_WORLD" --user --net -- \

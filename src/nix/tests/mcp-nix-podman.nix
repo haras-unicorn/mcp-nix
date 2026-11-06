@@ -187,6 +187,7 @@
 
               echo "driver: $(podman --remote info --format '{{.Store.GraphDriverName}}')"
               echo "greeting: $(podman --remote run --rm "$image")"
+              echo "uid: $(id -u)"
 
               # A probe that cannot connect for any reason would say blocked.
               podman --remote run --rm "$image" /bin/sh -c 'command -v wget' \
@@ -218,6 +219,7 @@
           # calls the test is about, `kill` starts the server and kills it.
           clientScript = pkgs.writeText "mcp-nix-podman-client.py" ''
             import json
+            import os
             import signal
             import subprocess
             import sys
@@ -306,6 +308,7 @@
             out = run("containers-probe", MACHINE, PORT, "/home/agent")
             assert "driver: overlay" in out, out
             assert "greeting: hello from the container" in out, out
+            assert "uid: " + str(os.getuid()) + "\n" in out, out
             assert "network host: blocked" in out, out
             assert "network bridge: blocked" in out, out
             assert "secret-file" not in out, out
