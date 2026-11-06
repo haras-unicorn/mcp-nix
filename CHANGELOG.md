@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/haras-unicorn/mcp-nix/compare/v0.2.0...v0.2.1) - 2026-11-06
+
+### Fixed
+
+- set proper uid gid ([#28](https://github.com/haras-unicorn/mcp-nix/pull/28))
+- flake registry ([#26](https://github.com/haras-unicorn/mcp-nix/pull/26))
+
 ## [0.2.0](https://github.com/haras-unicorn/mcp-nix/compare/v0.1.5...v0.2.0) - 2026-11-06
 
 ### Fixed
