@@ -5,9 +5,13 @@
 ## Sandbox configuration
 
 ```rust
-{{#include ../src/mcp-nix/src/sandbox_defaults.rs:default-sandbox}}
+{{#include ../src/crates/mcp-nix/src/sandbox_defaults.rs:default-sandbox}}
 ```
 
 ```rust
-{{#include ../src/mcp-nix/src/sandbox_defaults.rs:base-env}}
+{{#include ../src/crates/mcp-nix/src/sandbox_defaults.rs:default-nix-sandbox}}
+```
+
+```rust
+{{#include ../src/crates/mcp-nix/src/sandbox_defaults.rs:base-env}}
 ```

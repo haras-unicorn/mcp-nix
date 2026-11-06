@@ -1,11 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
+    "AGENTS.md",
     "README.md",
     "CONTRIBUTING.md",
     "flake.nix",
-    "src/mcp-nix/src/main.rs",
-    "src/mcp-nix/src/lib.rs",
-    "src/mcp-nix/src/nix.rs"
+    "src/crates/mcp-nix/src/main.rs",
+    "src/crates/mcp-nix/src/lib.rs",
+    "src/crates/mcp-nix/src/nix.rs"
   ]
 }
