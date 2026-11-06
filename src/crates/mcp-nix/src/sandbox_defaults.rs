@@ -30,12 +30,17 @@ pub const DEFAULT_SANDBOX_ARGS: &str = "\
 /// `NIX_REMOTE` is set because the sandbox makes `/nix/var/nix` for the socket,
 /// and `nix` finds that directory writable, so by default it opens a store of
 /// its own there, with nothing in it, and never talks to the daemon.
+///
+/// On NixOS `/etc/nix/nix.conf` and `registry.json` are links into
+/// `/etc/static/nix`, so that is bound too, or the settings and the registry
+/// of the system would not be visible.
 // ANCHOR: default-nix-sandbox
 pub const DEFAULT_NIX_SANDBOX_ARGS: &str = "\
 --die-with-parent --new-session --unshare-all \
 --ro-bind-try /nix/store /nix/store \
 --ro-bind-try /nix/var/nix/daemon-socket /nix/var/nix/daemon-socket \
 --ro-bind-try /etc/nix /etc/nix \
+--ro-bind-try /etc/static/nix /etc/static/nix \
 --ro-bind-try /etc/passwd /etc/passwd --ro-bind-try /etc/group /etc/group \
 --ro-bind-try /etc/nsswitch.conf /etc/nsswitch.conf \
 --tmpfs /tmp --setenv HOME /tmp --setenv NIX_REMOTE daemon \

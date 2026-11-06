@@ -12,6 +12,12 @@ const FEATURES: &str = "nix-command flakes";
 
 const FEATURES_FLAG: &str = "--extra-experimental-features";
 
+/// The global flake registry is downloaded from a fixed address, which a
+/// sandbox without network cannot reach. Nix loads it for every lookup in the
+/// registries, so a blank one is given in the sandbox, and a flake reference
+/// has to be found in the registry of the system or the user.
+const REGISTRY_FLAGS: [&str; 3] = ["--option", "flake-registry", ""];
+
 /// Environment variables a dev shell must not override, matching `nix develop`.
 const IGNORED_DEV_ENV: &[&str] = &[
   "BASHOPTS",
@@ -262,6 +268,9 @@ impl BuildGuard {
   /// which the sandbox does not show to `nix`.
   fn flags(&self) -> Vec<String> {
     let mut flags = [FEATURES_FLAG, FEATURES].map(str::to_string).to_vec();
+    if self.sandbox.is_some() {
+      flags.extend(REGISTRY_FLAGS.map(str::to_string));
+    }
     if let Some(hook) = &self.pre_build_hook {
       flags.extend(hook.nix_args());
     }
@@ -757,6 +766,23 @@ mod tests {
         "pre-build-hook",
         "/bin/hook",
         "--builders",
+        ""
+      ]
+    );
+  }
+
+  #[test]
+  fn a_sandboxed_command_gets_no_global_flake_registry() {
+    let guard =
+      BuildGuard::unguarded().sandboxed(vec!["bwrap".to_string()], vec![]);
+
+    assert_eq!(
+      guard.flags(),
+      [
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "--option",
+        "flake-registry",
         ""
       ]
     );
