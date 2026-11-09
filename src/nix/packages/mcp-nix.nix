@@ -85,6 +85,11 @@
           };
         };
 
+        # The control node of the NVIDIA driver, which tells that a GPU is
+        # there. It is the node the server looks for too, and the one its CUDA
+        # arguments bind.
+        nvidiaDevice = "/dev/nvidiactl";
+
         # The service runs in a bubblewrap that shows only its own state, so
         # containers cannot mount the home directory or the project. The state
         # is a fresh temporary directory per session that is deleted on exit,
@@ -92,12 +97,27 @@
         # subuids. The socket sits in a directory of its own, because that
         # directory is what gets bound into the sandbox of the programs. The
         # overlay driver needs userxattr because the mount happens inside a user
-        # namespace.
+        # namespace. The service gets a TMPDIR of its own sandbox, because the
+        # one of the caller is not in it.
+        #
+        # With MCP_NIX_PODMAN_CUDA set the service also sees the GPU: the
+        # device nodes, the driver and the CDI specification of the host, which
+        # NixOS writes to /run/cdi with hardware.nvidia-container-toolkit. A
+        # container then gets the GPU by asking podman for
+        # nvidia.com/gpu=all. Podman looks for the specification in
+        # /var/run/cdi, so /var/run links to /run as it does on the host. The
+        # specification also names files of the host to mount into the
+        # container, like the EGL configuration in /etc, and the runtime fails
+        # when they are missing, so those are bound as well, except for the
+        # store and the device nodes, which are bound already. Without
+        # MCP_NIX_PODMAN_CUDA none of these are bound, so a container cannot
+        # ask for the GPU either, with a CDI name or with --device.
         containerSandboxInside = final.writeShellApplication {
           name = "mcp-nix-container-sandbox-inside";
           runtimeInputs = [
             final.bubblewrap
             final.iproute2
+            final.jq
             final.nftables
             final.podman
           ];
@@ -115,6 +135,33 @@
             [storage.options.overlay]
             mountopt = "nodev,userxattr"
             EOF
+
+            gpu_args=()
+            if [ "''${MCP_NIX_PODMAN_CUDA:-}" = 1 ]; then
+              for node in /dev/nvidia*; do
+                if [ -e "$node" ]; then
+                  gpu_args+=(--dev-bind "$node" "$node")
+                fi
+              done
+              gpu_args+=(
+                --dev-bind-try /dev/dri /dev/dri
+                --ro-bind-try /run/opengl-driver /run/opengl-driver
+                --ro-bind-try /run/cdi /run/cdi
+              )
+              for spec in /run/cdi/*.json; do
+                [ -e "$spec" ] || continue
+                while IFS= read -r path; do
+                  case "$path" in
+                    /nix/store/* | /dev/*) continue ;;
+                  esac
+                  gpu_args+=(--ro-bind-try "$path" "$path")
+                done < <(
+                  jq --raw-output \
+                    '[.. | objects | .hostPath? // empty] | unique | .[]' \
+                    "$spec"
+                )
+              done
+            fi
 
             ip link set lo up
             # A new network namespace starts with forwarding off, and the
@@ -139,8 +186,11 @@
               --tmpfs /run \
               --tmpfs /tmp \
               --tmpfs /var/tmp \
+              --symlink ../run /var/run \
+              "''${gpu_args[@]}" \
               --bind "$state" "$state" \
               --setenv HOME "$state/home" \
+              --setenv TMPDIR /var/tmp \
               --setenv XDG_RUNTIME_DIR "$state/run" \
               --setenv CONTAINERS_CONF ${containersConf} \
               --setenv CONTAINERS_STORAGE_CONF "$state/storage.conf" \
@@ -246,15 +296,34 @@
         # is cleared in the sandbox of the programs, so the variables the
         # container clients read are set through bwrap_args_extra. The server
         # speaks the protocol on stdout, so nothing here may write to it.
+        #
+        # Containers get the GPU only when there is one and the sandbox of the
+        # programs has it too. The effective configuration of the server, from
+        # its own command, says so: the defaults, the file and the environment
+        # together, with the CUDA arguments in bwrap_args when the server adds
+        # them. A configuration that does not read fails here, as it would when
+        # the server starts.
         podman = final.writeShellApplication {
           name = "mcp-nix-podman";
           runtimeInputs = [
             containerSandbox
             containerWorld
+            final.jq
             wrapped
           ];
           text = ''
-            world="$(mktemp -d)"
+            effective="$(mcp-nix "$@" config --format json)"
+            cuda=0
+            if [ -e ${nvidiaDevice} ] \
+              && jq --exit-status --arg device ${nvidiaDevice} \
+                '.bwrap_args | contains($device)' \
+                <<< "$effective" > /dev/null; then
+              cuda=1
+            fi
+            MCP_NIX_PODMAN_CUDA="$cuda"
+            export MCP_NIX_PODMAN_CUDA
+
+            world="$(mktemp -d -t mcp-nix-podman-world.XXXXXX)"
             mcp-nix-container-sandbox \
               mcp-nix-container-world "$world/info" "$$" >&2 &
 

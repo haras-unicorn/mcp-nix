@@ -10,8 +10,9 @@ use ::config::{Environment, File};
 use anyhow::Context;
 use mcp_nix::{
   BindRoot, DEFAULT_BWRAP_COMMAND, DEFAULT_NIX_SANDBOX_ARGS,
-  DEFAULT_SANDBOX_ARGS,
+  DEFAULT_SANDBOX_ARGS, cuda_sandbox_args,
 };
+use rmcp::schemars;
 
 /// The name, without extension, of the configuration file read from the
 /// current directory when no file is given. It is a const because it has to be
@@ -34,7 +35,15 @@ const ENVIRONMENT_LIST_SEPARATOR: &str = ",";
 const LIST_KEYS: [&str; 1] = ["commands"];
 
 /// Settings of the `mcp-nix` binary.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+  Debug,
+  Clone,
+  PartialEq,
+  Eq,
+  serde::Serialize,
+  serde::Deserialize,
+  schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
   /// The lowest level of the events that are logged: `off`, `error`, `warn`,
@@ -52,6 +61,12 @@ pub struct Config {
   /// that the default can be kept and built on. It has no effect when
   /// `bwrap_args` is blank.
   pub bwrap_args_extra: String,
+  /// Add the CUDA arguments of the NVIDIA GPUs of the machine after
+  /// `bwrap_args`, when there are any. It is on by default and applies to any
+  /// `bwrap_args`, so a replaced list keeps the GPU unless this is turned off.
+  /// It has no effect when `bwrap_args` is blank. The sandbox of `nix` never
+  /// gets them, since nothing there uses a GPU.
+  pub add_cuda_bwrap_args: bool,
   /// The command that runs bubblewrap for `nix`, like `bwrap_command`. It is a
   /// setting of its own because the two sandboxes can need different ways in,
   /// for example when only the one of the programs runs in a container.
@@ -87,14 +102,37 @@ pub struct Config {
   /// `bwrap_args_extra`: `read-only` or `read-write`. Leaving it out is the
   /// default, since the programs are then able to see, and with `read-write`
   /// change, what is in it. It has no effect when `bwrap_args` is blank.
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub bind_root: Option<BindRoot>,
 }
 
 impl Config {
-  /// Load the configuration from the given file, which must exist, or from
-  /// `mcp-nix.toml` in the current directory, which may be missing.
+  /// Load the effective configuration: the defaults, the given file, which
+  /// must exist, or `mcp-nix.toml` in the current directory, which may be
+  /// missing, and the environment, with the CUDA arguments of the GPUs of the
+  /// machine added to `bwrap_args` when [`Config::with_cuda`] says so.
   pub fn load(file: Option<&Path>) -> anyhow::Result<Self> {
-    Self::build(file, environment())
+    let config = Self::build(file, environment())?;
+
+    Ok(config.with_cuda(cuda_sandbox_args().as_deref()))
+  }
+
+  /// This configuration with the given CUDA arguments after `bwrap_args`, or
+  /// as it is when there are none because there is no GPU, when
+  /// `add_cuda_bwrap_args` is off, or when `bwrap_args` is blank, which means
+  /// no sandbox.
+  pub fn with_cuda(self, cuda_args: Option<&str>) -> Self {
+    match cuda_args {
+      Some(cuda_args)
+        if self.add_cuda_bwrap_args && !self.bwrap_args.trim().is_empty() =>
+      {
+        Self {
+          bwrap_args: format!("{} {cuda_args}", self.bwrap_args),
+          ..self
+        }
+      }
+      _ => self,
+    }
   }
 
   fn build(
@@ -106,6 +144,7 @@ impl Config {
       .set_default("bwrap_command", DEFAULT_BWRAP_COMMAND)?
       .set_default("bwrap_args", DEFAULT_SANDBOX_ARGS)?
       .set_default("bwrap_args_extra", "")?
+      .set_default("add_cuda_bwrap_args", true)?
       .set_default("nix_bwrap_command", DEFAULT_BWRAP_COMMAND)?
       .set_default("nix_bwrap_args", DEFAULT_NIX_SANDBOX_ARGS)?
       .set_default("nix_bwrap_args_extra", "")?
@@ -147,6 +186,8 @@ mod tests {
   use std::fs;
   use std::path::PathBuf;
 
+  use mcp_nix::DEFAULT_CUDA_SANDBOX_ARGS;
+
   use super::*;
 
   /// A configuration file with the given contents that is removed on drop.
@@ -187,6 +228,7 @@ mod tests {
     assert_eq!(config.bwrap_command, DEFAULT_BWRAP_COMMAND);
     assert_eq!(config.bwrap_args, DEFAULT_SANDBOX_ARGS);
     assert_eq!(config.bwrap_args_extra, "");
+    assert!(config.add_cuda_bwrap_args);
     assert_eq!(config.nix_bwrap_command, DEFAULT_BWRAP_COMMAND);
     assert_eq!(config.nix_bwrap_args, DEFAULT_NIX_SANDBOX_ARGS);
     assert_eq!(config.nix_bwrap_args_extra, "");
@@ -196,6 +238,58 @@ mod tests {
     assert_eq!(config.log_limit, 100);
     assert_eq!(config.root, "");
     assert_eq!(config.bind_root, None);
+  }
+
+  #[test]
+  fn any_sandbox_gets_the_cuda_arguments_and_the_nix_one_does_not() {
+    for value in [DEFAULT_SANDBOX_ARGS, "--unshare-all"] {
+      let file = TempFile::new("cuda", &format!("bwrap_args = \"{value}\"\n"));
+      let config = Config::build(Some(&file.path), env(&[])).unwrap();
+
+      let config = config.with_cuda(Some("--cuda"));
+
+      assert_eq!(config.bwrap_args, format!("{value} --cuda"));
+      assert_eq!(config.nix_bwrap_args, DEFAULT_NIX_SANDBOX_ARGS);
+    }
+  }
+
+  #[test]
+  fn the_sandbox_is_left_alone_without_a_gpu() {
+    let file = TempFile::new("no-gpu", "");
+    let config = Config::build(Some(&file.path), env(&[])).unwrap();
+
+    assert_eq!(config.clone().with_cuda(None), config);
+  }
+
+  #[test]
+  fn the_sandbox_is_left_alone_when_the_setting_is_off() {
+    let file = TempFile::new("off", "add_cuda_bwrap_args = false\n");
+    let config = Config::build(Some(&file.path), env(&[])).unwrap();
+
+    let config = config.with_cuda(Some("--cuda"));
+
+    assert_eq!(config.bwrap_args, DEFAULT_SANDBOX_ARGS);
+  }
+
+  #[test]
+  fn a_blank_sandbox_stays_blank_with_a_gpu() {
+    let file = TempFile::new("blank", "bwrap_args = \" \"\n");
+    let config = Config::build(Some(&file.path), env(&[])).unwrap();
+
+    let config = config.with_cuda(Some("--cuda"));
+
+    assert_eq!(config.bwrap_args, " ");
+  }
+
+  #[test]
+  fn the_extra_arguments_stay_after_the_cuda_arguments() {
+    let file = TempFile::new("extra", "bwrap_args_extra = \"--share-net\"\n");
+    let config = Config::build(Some(&file.path), env(&[])).unwrap();
+
+    let config = config.with_cuda(Some(DEFAULT_CUDA_SANDBOX_ARGS));
+
+    assert_eq!(config.bwrap_args_extra, "--share-net");
+    assert!(config.bwrap_args.ends_with(DEFAULT_CUDA_SANDBOX_ARGS));
   }
 
   #[test]
@@ -224,6 +318,7 @@ bind_root = \"read-write\"\n",
         ("MCP_NIX__LOG_LIMIT", "9"),
         ("MCP_NIX__BWRAP_ARGS", "--unshare-all"),
         ("MCP_NIX__BWRAP_ARGS_EXTRA", "--share-net"),
+        ("MCP_NIX__ADD_CUDA_BWRAP_ARGS", "false"),
         ("MCP_NIX__NIX_BWRAP_ARGS", "--unshare-net"),
         ("MCP_NIX__NIX_BWRAP_ARGS_EXTRA", "--setenv A b"),
         ("MCP_NIX__BWRAP_COMMAND", "nsenter bwrap"),
@@ -242,6 +337,7 @@ bind_root = \"read-write\"\n",
     assert_eq!(config.log_limit, 9);
     assert_eq!(config.bwrap_args, "--unshare-all");
     assert_eq!(config.bwrap_args_extra, "--share-net");
+    assert!(!config.add_cuda_bwrap_args);
     assert_eq!(config.nix_bwrap_args, "--unshare-net");
     assert_eq!(config.nix_bwrap_args_extra, "--setenv A b");
     assert_eq!(config.bwrap_command, "nsenter bwrap");

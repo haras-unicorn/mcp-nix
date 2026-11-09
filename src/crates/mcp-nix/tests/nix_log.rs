@@ -135,6 +135,35 @@ fn fetch_log_from_end_with_offset_walks_backwards() {
 }
 
 #[test]
+fn fetch_log_reads_a_log_that_nix_can_read_outside_of_the_nix_sandbox() {
+  let Some(guard) = common::sandboxed_guard() else {
+    eprintln!("skipping: bubblewrap cannot be used here");
+    return;
+  };
+  let flake = TempFlake::new(ECHO_FLAKE);
+  let Some(store_path) = build_flake_with_log(&flake) else {
+    eprintln!("skipping: build log not available in this environment");
+    return;
+  };
+
+  let log = fetch_log(
+    &guard,
+    &store_path,
+    &LogOptions {
+      offset: 0,
+      limit: 10,
+      from_end: false,
+    },
+  )
+  .unwrap();
+
+  assert!(
+    log.contains("log-line-1"),
+    "expected the sandbox of nix to show the build log, got:\n{log}"
+  );
+}
+
+#[test]
 fn fetch_log_refuses_a_fixed_output_derivation_evaluation_needs() {
   assert_nix_builds();
   let flake = TempFlake::new(IMPORTED_FIXED_OUTPUT_FLAKE);

@@ -156,6 +156,25 @@
             "pgrep"
             "odman"
             "getuid"
+            "cuda"
+            "userspace"
+            "libcuda"
+            "nvidiactl"
+            "ctypes"
+            "cdll"
+            "esac"
+            "cdi"
+            "cuinit"
+            "byref"
+            "textwrap"
+            "pathlib"
+            "syscall"
+            "syscalls"
+            "setgid"
+            "sgid"
+            "chkpwd"
+            "privs"
+            "iterdir"
           ];
         };
 
@@ -455,6 +474,14 @@
               MCP_NIX__PRE_BUILD_HOOK="''${MCP_NIX__PRE_BUILD_HOOK:-$PWD/target/debug/mcp-nix-hook}"
               export MCP_NIX__PRE_BUILD_HOOK
               cargo run --bin mcp-nix
+            '';
+          };
+
+          test-cuda = {
+            description = "Test the GPU in the sandbox and in containers.";
+            packages = [ pkgs.nix ];
+            commands = ''
+              nix run "git+file://$PWD#mcp-nix-cuda-test" --show-trace
             '';
           };
 

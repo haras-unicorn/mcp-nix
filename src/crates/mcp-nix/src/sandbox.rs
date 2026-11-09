@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+use rmcp::schemars;
+
 pub use crate::sandbox_defaults::{
-  BASE_ENV, DEFAULT_BWRAP_COMMAND, DEFAULT_NIX_SANDBOX_ARGS,
-  DEFAULT_SANDBOX_ARGS,
+  BASE_ENV, DEFAULT_BWRAP_COMMAND, DEFAULT_CUDA_SANDBOX_ARGS,
+  DEFAULT_NIX_SANDBOX_ARGS, DEFAULT_SANDBOX_ARGS, NVIDIA_GPU_DEVICE,
 };
 
 /// Errors produced while running a program from a built nix package or a dev
@@ -73,10 +75,27 @@ pub fn parse_bwrap_command(value: &str) -> Vec<String> {
   split_args(value)
 }
 
+/// The bubblewrap arguments that give a sandbox the NVIDIA GPUs of the
+/// machine, or `None` when there is no GPU, which is when its driver has not
+/// made the [`NVIDIA_GPU_DEVICE`] node. They are [`DEFAULT_CUDA_SANDBOX_ARGS`]
+/// and a bind for the node of each GPU, like `/dev/nvidia0`.
+pub fn cuda_sandbox_args() -> Option<String> {
+  cuda_sandbox_args_at(Path::new(NVIDIA_GPU_DEVICE))
+}
+
 /// How the root directory of the tools is bound into the sandbox of the
 /// programs `nix_run` and `nix_develop` run. It is the `bind_root` setting,
 /// as `read-only` or `read-write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+  Debug,
+  Clone,
+  Copy,
+  PartialEq,
+  Eq,
+  serde::Serialize,
+  serde::Deserialize,
+  schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum BindRoot {
   /// Programs can read the root.
@@ -98,6 +117,52 @@ pub fn bind_root_args(root: &Path, mode: BindRoot) -> Vec<String> {
   [flag, root.as_ref(), root.as_ref()]
     .map(str::to_string)
     .to_vec()
+}
+
+/// [`cuda_sandbox_args`] for the machine whose control node is `control`, with
+/// the nodes of the GPUs next to it.
+fn cuda_sandbox_args_at(control: &Path) -> Option<String> {
+  if !control.exists() {
+    return None;
+  }
+
+  let binds = control
+    .parent()
+    .map(gpu_nodes)
+    .unwrap_or_default()
+    .into_iter()
+    .map(|node| format!("--dev-bind-try {node} {node}"));
+
+  Some(
+    std::iter::once(DEFAULT_CUDA_SANDBOX_ARGS.to_string())
+      .chain(binds)
+      .collect::<Vec<String>>()
+      .join(" "),
+  )
+}
+
+/// The paths of the nodes of the GPUs in a directory of devices: `nvidia`
+/// followed by a number, in order of name.
+fn gpu_nodes(directory: &Path) -> Vec<String> {
+  let Ok(entries) = std::fs::read_dir(directory) else {
+    return Vec::new();
+  };
+
+  let mut nodes = entries
+    .filter_map(Result::ok)
+    .filter(|entry| {
+      entry
+        .file_name()
+        .to_str()
+        .and_then(|name| name.strip_prefix("nvidia"))
+        .is_some_and(|rest| {
+          !rest.is_empty() && rest.chars().all(|digit| digit.is_ascii_digit())
+        })
+    })
+    .map(|entry| entry.path().to_string_lossy().into_owned())
+    .collect::<Vec<String>>();
+  nodes.sort();
+  nodes
 }
 
 fn split_args(value: &str) -> Vec<String> {
@@ -515,6 +580,96 @@ mod tests {
 
       assert!(args.contains(&"--new-session".to_string()), "{defaults}");
     }
+  }
+
+  #[test]
+  fn the_cuda_arguments_come_from_a_known_gpu_node_and_bind_it() {
+    let args =
+      parse_sandbox_args(DEFAULT_CUDA_SANDBOX_ARGS).unwrap_or_default();
+
+    assert!(args.contains(&NVIDIA_GPU_DEVICE.to_string()));
+    assert!(args.contains(&"/run/opengl-driver".to_string()));
+  }
+
+  #[test]
+  fn the_cuda_arguments_only_skip_what_is_missing() {
+    let args =
+      parse_sandbox_args(DEFAULT_CUDA_SANDBOX_ARGS).unwrap_or_default();
+
+    for flag in args.iter().filter(|arg| arg.starts_with("--")) {
+      assert!(flag.ends_with("-try"), "{flag}");
+    }
+  }
+
+  /// A directory of devices with the given empty files in it, removed on
+  /// drop.
+  struct Devices {
+    directory: std::path::PathBuf,
+  }
+
+  impl Devices {
+    fn new(name: &str, nodes: &[&str]) -> Self {
+      let directory = std::env::temp_dir()
+        .join(format!("mcp-nix-devices-{}-{name}", std::process::id()));
+      std::fs::create_dir_all(&directory).unwrap();
+      for node in nodes {
+        std::fs::write(directory.join(node), "").unwrap();
+      }
+      Self { directory }
+    }
+
+    fn control(&self) -> std::path::PathBuf {
+      self.directory.join("nvidiactl")
+    }
+  }
+
+  impl Drop for Devices {
+    fn drop(&mut self) {
+      let _ = std::fs::remove_dir_all(&self.directory);
+    }
+  }
+
+  #[test]
+  fn there_are_no_cuda_arguments_without_the_control_node() {
+    let devices = Devices::new("none", &["nvidia0"]);
+
+    assert_eq!(cuda_sandbox_args_at(&devices.control()), None);
+  }
+
+  #[test]
+  fn the_cuda_arguments_bind_the_node_of_every_gpu() {
+    let devices = Devices::new(
+      "gpus",
+      &[
+        "nvidiactl",
+        "nvidia1",
+        "nvidia0",
+        "nvidia-uvm",
+        "nvidia-foo",
+        "null",
+      ],
+    );
+    let directory = devices.directory.display();
+
+    let args = cuda_sandbox_args_at(&devices.control()).unwrap();
+
+    assert_eq!(
+      args,
+      format!(
+        "{DEFAULT_CUDA_SANDBOX_ARGS} \
+         --dev-bind-try {directory}/nvidia0 {directory}/nvidia0 \
+         --dev-bind-try {directory}/nvidia1 {directory}/nvidia1"
+      )
+    );
+  }
+
+  #[test]
+  fn the_cuda_arguments_without_gpu_nodes_are_the_defaults() {
+    let devices = Devices::new("one", &["nvidiactl"]);
+
+    let args = cuda_sandbox_args_at(&devices.control()).unwrap();
+
+    assert_eq!(args, DEFAULT_CUDA_SANDBOX_ARGS);
   }
 
   #[test]

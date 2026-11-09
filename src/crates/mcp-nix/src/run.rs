@@ -117,6 +117,7 @@ mod tests {
       bwrap_command: "nsenter --target 1 bwrap".to_string(),
       bwrap_args: sandbox.to_string(),
       bwrap_args_extra: String::new(),
+      add_cuda_bwrap_args: true,
       nix_bwrap_command: "env bwrap".to_string(),
       nix_bwrap_args: "--unshare-net".to_string(),
       nix_bwrap_args_extra: String::new(),

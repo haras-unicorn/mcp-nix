@@ -10,15 +10,17 @@ is a Rust Cargo workspace built on
 - `src/crates` - the Cargo workspace members. Today a single crate, `mcp-nix`,
   that is both a library (`lib.rs` only declares modules and the prelude; the
   server, `nix`, `sandbox` and `hook` live in their own modules) and two
-  binaries: `mcp-nix` (`args`, `config`, `log` and `run` around `main`) and
-  `mcp-nix-hook` in `src/bin`, the program `nix` runs before each build.
+  binaries: `mcp-nix` (`args`, `config`, `log`, `run` and `show`, which prints
+  the schema and the effective configuration, around `main`) and `mcp-nix-hook`
+  in `src/bin`, the program `nix` runs before each build.
 - `src/crates/*/tests` - integration tests that drive a real `nix`.
 - `src/nix/tests` - NixOS VM tests, for example the one of `mcp-nix-podman`.
   They are flake checks, so `nix flake check` runs them, and a single one can be
   built as `checks.<system>.nixos-test-<name>`.
 - `src/nix` - every Nix file, each a flake-parts module for haraspkgs:
-  `systems.nix`, the package overlays in `packages/`, the dev shell in `dev/`
-  and the VM tests in `tests/`.
+  `systems.nix`, the package overlays in `packages/`, the overlays of programs
+  that run on the machine and not in CI in `overlays/` (the GPU test, run by
+  `dev test-cuda`), the dev shell in `dev/` and the VM tests in `tests/`.
 - `docs` - the mdBook. It includes parts of `README.md` and of the Rust sources
   through anchors, so moving either means updating the includes.
 - `Cargo.toml` and `clippy.toml` at the root hold the shared package metadata,

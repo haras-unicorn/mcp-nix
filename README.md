@@ -144,6 +144,7 @@ environment variable is the key in uppercase after `MCP_NIX__`, for example
 | `bwrap_command`        | `bwrap`             | Command that runs bubblewrap for the programs, see [Sandboxing](#sandboxing).                                           |
 | `bwrap_args`           | the default sandbox | Bubblewrap arguments of the programs, see [Sandboxing](#sandboxing).                                                    |
 | `bwrap_args_extra`     | blank               | Arguments added after `bwrap_args`, see [Sandboxing](#sandboxing).                                                      |
+| `add_cuda_bwrap_args`  | `true`              | Add the arguments for the NVIDIA GPUs after `bwrap_args`, see [NVIDIA GPUs](#nvidia-gpus).                              |
 | `nix_bwrap_command`    | `bwrap`             | Command that runs bubblewrap for `nix`, see [The sandbox of nix](#the-sandbox-of-nix).                                  |
 | `nix_bwrap_args`       | the default sandbox | Bubblewrap arguments for `nix`, see [The sandbox of nix](#the-sandbox-of-nix).                                          |
 | `nix_bwrap_args_extra` | blank               | Arguments added after `nix_bwrap_args`, see [The sandbox of nix](#the-sandbox-of-nix).                                  |
@@ -153,6 +154,13 @@ environment variable is the key in uppercase after `MCP_NIX__`, for example
 | `root`                 | blank               | Directory of the tools, see [Environment](#environment). Blank is the working directory of the server.                  |
 | `bind_root`            | unset               | `read-only` or `read-write` binds the root into the sandbox, see [Environment](#environment).                           |
 | `log_limit`            | `100`               | Lines per `nix_log` page when the caller gives no limit.                                                                |
+
+Two commands print and exit instead of serving. `mcp-nix schema` prints the JSON
+schema of the settings. `mcp-nix config` prints the effective settings, which
+are the defaults, the file and the environment together, with the arguments for
+the GPUs in `bwrap_args` when the server would add them. `--format` picks `toml`
+(the default), `yaml` or `json`, and `--config` picks the file as for the
+server.
 
 ## Sandboxing
 
@@ -456,13 +464,41 @@ What this does not protect against, on purpose:
 - They can run a container that binds what the sandbox of the programs shows, so
   what the sandbox shows is what a container shows.
 
-Not planned: GPUs in containers, and a filter in front of the podman socket.
+Not planned: a filter in front of the podman socket.
 
 `nix flake check` runs a NixOS VM test of this package
 (`src/nix/tests/mcp-nix-podman.nix`). It starts the real server, and drives it
 as an MCP client would: it builds, runs containers with Postgres through
 testcontainers, shows that the network is blocked from the programs and from
 containers, and that a killed server leaves nothing behind.
+
+### NVIDIA GPUs
+
+When an NVIDIA GPU is present, which is when its driver has made
+`/dev/nvidiactl`, the server adds CUDA arguments after `bwrap_args`: the device
+nodes of the driver, a node for each GPU (`/dev/nvidia0` and so on) and the
+userspace driver in `/run/opengl-driver`, where NixOS links it and where
+programs from the nix store look for `libcuda`. They are `-try` binds, so what
+is missing is skipped. The `add_cuda_bwrap_args` setting turns this off, and it
+is on by default, so a `bwrap_args` that you replace keeps the GPU too. A blank
+`bwrap_args` is still no sandbox, and the sandbox of `nix` never gets them.
+
+The `mcp-nix-podman` wrapper gives containers the GPU when the sandbox of the
+programs has it: it runs `mcp-nix config` with its own arguments and looks for
+`/dev/nvidiactl` in the effective `bwrap_args`. So the file, the environment and
+the setting all count, and so does a `bwrap_args` that binds the GPU itself. The
+service of podman then sees the GPU and the CDI specification of the host in
+`/run/cdi` (on NixOS, `hardware.nvidia-container-toolkit.enable` writes it), and
+a container gets the GPU with `--device nvidia.com/gpu=all`. Without them
+nothing of the GPU is bound, so a container cannot ask for it.
+
+CI has no GPU, so the GPU is not part of `nix flake check`. On a machine with
+one, `dev test-cuda` runs `mcp-nix-cuda-test`: it starts `mcp-nix-podman` and
+checks with a CUDA probe that the sandbox of the programs and a container see
+the GPU, and that neither does when `add_cuda_bwrap_args` is off in a
+configuration file. It also checks that every server leaves no temporary
+directories behind. Without a GPU it says so and passes. It is not a NixOS test,
+for the reasons at the top of `src/nix/overlays/cuda.nix`.
 
 [bubblewrap]: https://github.com/containers/bubblewrap
 [testcontainers]: https://testcontainers.com

@@ -11,8 +11,9 @@ pub use nix::{
   develop, fetch_log, run_package,
 };
 pub use sandbox::{
-  BindRoot, DEFAULT_BWRAP_COMMAND, DEFAULT_NIX_SANDBOX_ARGS,
-  DEFAULT_SANDBOX_ARGS, RunOptions, bind_root_args, parse_bwrap_command,
+  BindRoot, DEFAULT_BWRAP_COMMAND, DEFAULT_CUDA_SANDBOX_ARGS,
+  DEFAULT_NIX_SANDBOX_ARGS, DEFAULT_SANDBOX_ARGS, NVIDIA_GPU_DEVICE,
+  RunOptions, bind_root_args, cuda_sandbox_args, parse_bwrap_command,
   parse_sandbox_args, run_program,
 };
 pub use server::{
