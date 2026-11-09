@@ -273,9 +273,11 @@ pub fn guard() -> BuildGuard {
 /// bubblewrap cannot be used here.
 ///
 /// The sandbox is the default one, with what a test environment needs on top
-/// of it. There is usually no daemon, so `nix` works on a store of its own,
-/// which the default `NIX_REMOTE` would keep it from, and runs the hook
-/// itself, and the flakes of the tests are in the temporary directory.
+/// of it. There is usually no daemon, so `nix` works on the same store as the
+/// tests outside of the sandbox, the one in `NIX_REMOTE` or else the one nix
+/// picks itself, which the default `NIX_REMOTE` would keep it from, and runs
+/// the hook itself. The flakes of the tests, and the store of the tests in
+/// `nix flake check`, are in the temporary directory.
 pub fn sandboxed_guard() -> Option<BuildGuard> {
   if !bwrap_usable() {
     return None;
@@ -285,6 +287,8 @@ pub fn sandboxed_guard() -> Option<BuildGuard> {
   let hook = Path::new(env!("CARGO_BIN_EXE_mcp-nix-hook"));
   let hook_dir = hook.parent().map(|dir| dir.display().to_string());
   let home = std::env::var("HOME").unwrap_or_default();
+  let store =
+    std::env::var("NIX_REMOTE").unwrap_or_else(|_| "auto".to_string());
 
   let mut args = mcp_nix::parse_sandbox_args(mcp_nix::DEFAULT_NIX_SANDBOX_ARGS)
     .unwrap_or_default();
@@ -299,7 +303,7 @@ pub fn sandboxed_guard() -> Option<BuildGuard> {
   for (flag, path) in extra {
     args.extend([flag.to_string(), path.clone(), path]);
   }
-  args.extend(["--setenv", "NIX_REMOTE", "auto"].map(str::to_string));
+  args.extend(["--setenv".to_string(), "NIX_REMOTE".to_string(), store]);
 
   Some(guard().sandboxed(
     mcp_nix::parse_bwrap_command(mcp_nix::DEFAULT_BWRAP_COMMAND),
@@ -557,6 +561,25 @@ pub fn nixpkgs_flake() -> String {
 }}
 "#
   )
+}
+
+/// A flake whose default package is the python of nixpkgs.
+pub fn python_flake() -> TempFlake {
+  TempFlake::new(&format!(
+    r#"
+{{
+  inputs = {{
+    nixpkgs.url = "github:nixos/nixpkgs/{NIXPKGS_REV}";
+  }};
+  outputs =
+    {{ self, nixpkgs }}:
+    {{
+      packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.python3;
+      packages.aarch64-linux.default = nixpkgs.legacyPackages.aarch64-linux.python3;
+    }};
+}}
+"#
+  ))
 }
 
 /// Build the dev shell environment of the given flake ahead of time, so that

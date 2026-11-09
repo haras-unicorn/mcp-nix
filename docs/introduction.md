@@ -13,5 +13,9 @@
 ```
 
 ```rust
+{{#include ../src/crates/mcp-nix/src/sandbox_defaults.rs:default-cuda-sandbox}}
+```
+
+```rust
 {{#include ../src/crates/mcp-nix/src/sandbox_defaults.rs:base-env}}
 ```

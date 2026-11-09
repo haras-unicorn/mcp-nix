@@ -417,12 +417,12 @@
             print(out)
 
         with subtest("nothing is left behind"):
-            machine.wait_until_fails("ls -d /tmp/mcp-nix-podman.*")
+            machine.wait_until_fails("ls -d /tmp/mcp-nix-podman*")
             machine.wait_until_fails("pgrep -f '[p]odman'")
 
         with subtest("a killed server leaves nothing behind"):
             machine.succeed(f"su - agent -c '{client} kill'")
-            machine.wait_until_fails("ls -d /tmp/mcp-nix-podman.*")
+            machine.wait_until_fails("ls -d /tmp/mcp-nix-podman*")
             machine.wait_until_fails("pgrep -f '[p]odman'")
       '';
     };
